@@ -55,7 +55,7 @@ export type ChessGameStatus = 'chess_active' | 'chess_waiting_for_opponent'
 
 export async function fetchChessGames(status: ChessGameStatus = 'chess_active'): Promise<ChessGameRow[]> {
   if (!supabaseConfigured()) {
-    throw new Error('Supabase 未配置：请设置 VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY')
+    throw new Error('Supabase is not configured: set VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY')
   }
 
   const res = await fetch(
@@ -70,7 +70,7 @@ export async function fetchChessGames(status: ChessGameStatus = 'chess_active'):
 
   if (!res.ok) {
     const detail = await res.text().catch(() => '')
-    throw new Error(`加载 chess_games 失败 (${res.status})${detail ? `: ${detail}` : ''}`)
+    throw new Error(`Failed to load chess_games (${res.status})${detail ? `: ${detail}` : ''}`)
   }
 
   const data: unknown = await res.json()
@@ -81,7 +81,7 @@ export async function fetchChessGames(status: ChessGameStatus = 'chess_active'):
 /** Read open markets straight from Supabase (RLS exposes the table read-only to `anon`). */
 export async function fetchMarkets(): Promise<MarketRow[]> {
   if (!supabaseConfigured()) {
-    throw new Error('Supabase 未配置：请设置 VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY')
+    throw new Error('Supabase is not configured: set VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY')
   }
 
   const res = await fetch(
@@ -96,7 +96,7 @@ export async function fetchMarkets(): Promise<MarketRow[]> {
 
   if (!res.ok) {
     const detail = await res.text().catch(() => '')
-    throw new Error(`加载 markets 失败 (${res.status})${detail ? `: ${detail}` : ''}`)
+    throw new Error(`Failed to load markets (${res.status})${detail ? `: ${detail}` : ''}`)
   }
 
   const data: unknown = await res.json()

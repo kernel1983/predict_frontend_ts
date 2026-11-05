@@ -47,9 +47,9 @@ const pieceGlyphs: Record<string, string> = {
   k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟',
 }
 const outcomes: { value: Outcome; title: string; detail: string; odds: string }[] = [
-  { value: 'white', title: 'White wins', detail: '白方获胜', odds: '2.10×' },
-  { value: 'draw', title: 'Draw', detail: '和棋', odds: '3.25×' },
-  { value: 'black', title: 'Black wins', detail: '黑方获胜', odds: '2.42×' },
+  { value: 'white', title: 'White wins', detail: 'White wins', odds: '2.10×' },
+  { value: 'draw', title: 'Draw', detail: 'Draw', odds: '3.25×' },
+  { value: 'black', title: 'Black wins', detail: 'Black wins', odds: '2.42×' },
 ]
 
 type Side = 'w' | 'b'

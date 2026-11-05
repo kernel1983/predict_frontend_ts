@@ -83,7 +83,13 @@ async function ensureWalletChainViaProvider(
   try {
     await switchChain()
   } catch (error) {
-    if (rpcErrorCode(error) !== 4902) throw error
+    const message = pickProviderErrorMessage(error)?.toLowerCase() ?? ''
+    const chainNotFound =
+      rpcErrorCode(error) === 4902 ||
+      message.includes('unrecognized chain id') ||
+      message.includes('unknown chain') ||
+      message.includes('chain not found')
+    if (!chainNotFound) throw error
     try {
       await provider.request({
         method: 'wallet_addEthereumChain',

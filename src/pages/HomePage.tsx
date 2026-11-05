@@ -198,8 +198,8 @@ export default function HomePage() {
 
       {!supabaseConfigured() && (
         <p className="mt-4 rounded-xl border border-border bg-bg px-4 py-3 text-sm text-text">
-          未配置 Supabase：请在 <code>.env</code> 中设置 <code>VITE_SUPABASE_URL</code> 和{' '}
-          <code>VITE_SUPABASE_ANON_KEY</code> 后刷新页面。
+          Supabase is not configured. Set <code>VITE_SUPABASE_URL</code> and{' '}
+          <code>VITE_SUPABASE_ANON_KEY</code> in <code>.env</code>, then refresh the page.
         </p>
       )}
 
@@ -211,13 +211,13 @@ export default function HomePage() {
 
       {marketsError && (
         <p className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">
-          加载市场失败：{marketsError instanceof Error ? marketsError.message : String(marketsError)}
+          Failed to load markets: {marketsError instanceof Error ? marketsError.message : String(marketsError)}
         </p>
       )}
 
       {supabaseConfigured() && !marketsLoading && !marketsError && cards.length === 0 && (
         <p className="mt-4 rounded-xl border border-border bg-bg px-4 py-3 text-sm text-text">
-          暂无开放中的市场。
+          No open markets.
         </p>
       )}
 

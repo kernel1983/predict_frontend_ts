@@ -4,7 +4,7 @@ import { useChessGames } from '@/hooks/useChessGames'
 import { supabaseConfigured, type ChessGameRow, type ChessGameStatus } from '@/lib/supabase'
 
 function shortAddress(address: string | null): string {
-  if (!address) return '待加入'
+  if (!address) return 'Join'
   return `${address.slice(0, 6)}…${address.slice(-4)}`
 }
 
@@ -22,16 +22,16 @@ function GameRow({ game }: { game: ChessGameRow }) {
         </p>
       </div>
       <span className="rounded-full border border-accent-border px-2 py-0.5 text-xs font-medium text-accent">
-        {game.black ? '进行中' : '等待对手'}
+        {game.black ? 'In progress' : 'Waiting for opponent'}
       </span>
     </Link>
   )
 }
 
 const COPY: Record<ChessGameStatus, { empty: string }> = {
-  chess_active: { empty: '暂无进行中的对局' },
+  chess_active: { empty: 'No active games' },
   chess_waiting_for_opponent: {
-    empty: '暂无等待中的对局，点击上方「+ New chess game」开一局。',
+    empty: 'No games waiting for an opponent. Click “+ New chess game” to start one.',
   },
 }
 
@@ -50,7 +50,7 @@ function ChessGamesList({ status }: { status: ChessGameStatus }) {
 
       {error && (
         <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">
-          加载对局失败：{error instanceof Error ? error.message : String(error)}
+          Failed to load games: {error instanceof Error ? error.message : String(error)}
         </p>
       )}
 
@@ -75,8 +75,8 @@ export function OngoingChessGames() {
   return (
     <section className="mt-8">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold text-text-h">进行中的游戏</h2>
-        <span className="text-xs text-text">棋盘对局实时更新</span>
+        <h2 className="text-lg font-semibold text-text-h">Active games</h2>
+        <span className="text-xs text-text">Chess games update in real time</span>
       </div>
       <ChessGamesList status="chess_active" />
     </section>

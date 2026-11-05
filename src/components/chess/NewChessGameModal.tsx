@@ -64,26 +64,48 @@ export function NewChessGameModal({ open, onClose }: { open: boolean; onClose: (
         data,
       })
       toast.push({ title: 'Chess game creation submitted', description: hash.slice(0, 12), variant: 'success' })
-      const findGameId = (value: unknown): string | null => {
+      const findGameId = (value: unknown, creationEvent = false): string | null => {
         if (Array.isArray(value)) {
           for (const item of value) {
-            const found = findGameId(item)
+            const found = findGameId(item, creationEvent)
             if (found) return found
           }
           return null
         }
+        if (typeof value === 'string') {
+          // Some indexer responses encode an event's data as a JSON string.
+          try {
+            return findGameId(JSON.parse(value), creationEvent)
+          } catch {
+            return null
+          }
+        }
         if (!value || typeof value !== 'object') return null
         const record = value as Record<string, unknown>
-        for (const key of ['game_id', 'gameId', 'chess_game_id', 'game']) {
+        const eventName = [record.event, record.name, record.type, record.kind]
+          .filter((candidate): candidate is string => typeof candidate === 'string')
+          .join(' ')
+          .toLowerCase()
+        const isCreationEvent = creationEvent || /(create|created|creation).*game|game.*(create|created|creation)/.test(eventName)
+        for (const key of ['game_id', 'gameId', 'chess_game_id', 'game_id_value', 'game']) {
           const candidate = record[key]
+          if (typeof candidate === 'string' || typeof candidate === 'number') return String(candidate)
+        }
+        // The testnet indexer returns the creation event as { ..., data: { id } }.
+        if (isCreationEvent) {
+          const candidate = record.id
           if (typeof candidate === 'string' || typeof candidate === 'number') return String(candidate)
         }
         for (const key of ['args', 'arguments', 'a']) {
           const args = record[key]
           if (Array.isArray(args) && (typeof args[0] === 'string' || typeof args[0] === 'number')) return String(args[0])
+          if (args && typeof args === 'object') {
+            const found = findGameId(args, isCreationEvent)
+            if (found) return found
+          }
         }
-        for (const child of Object.values(record)) {
-          const found = findGameId(child)
+        for (const [key, child] of Object.entries(record)) {
+          const found = findGameId(child, isCreationEvent || key === 'data' || key === 'result' || key === 'events')
           if (found) return found
         }
         return null

@@ -19,6 +19,7 @@ import {
   type DepositFactoryConfig,
 } from '@/lib/deposit'
 import { formatAmount } from '@/lib/amounts'
+import { previewLimitOrder } from '@/lib/limitOrder'
 
 type Outcome = 'white' | 'draw' | 'black'
 
@@ -230,7 +231,6 @@ export default function ChessDebugPage() {
   const [submitted, setSubmitted] = useState(false)
   const [history, setHistory] = useState<ChessHistoryEntry[]>([])
   const [historyIndex, setHistoryIndex] = useState(-1)
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<{ r: number; c: number } | null>(null)
   const [promotionMove, setPromotionMove] = useState<{ move: string; r: number; c: number } | null>(null)
@@ -252,20 +252,60 @@ export default function ChessDebugPage() {
     : []
 
   const loadChessHistory = useCallback(async () => {
-    try {
-      const prefix = `chess-chess_state:${gameId}`
-      const response = await fetch(`${env.indexerUrl}/api/query_recent_state?prefix=${encodeURIComponent(prefix)}`)
+    const prefix = `${mode === 'local' ? 'chess' : 'base-chess'}-chess_state:${gameId}`
+    const url = `${env.indexerUrl}/api/query_recent_state?prefix=${encodeURIComponent(prefix)}`
+    console.info('[chess] loading history', { mode, gameId, prefix, url })
+    //try {
+      const response = await fetch(url)
+      console.info('[chess] history response', { url, status: response.status, ok: response.ok })
       if (!response.ok) throw new Error(`Node returned ${response.status}`)
-      const payload: { result?: ChessHistoryEntry[] } = await response.json()
-      const stateEntries = (payload.result ?? []).filter((entry) => Array.isArray(entry.value?.chess_board))
+      const payload: unknown = await response.json()
+      const payloadRecord = payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? payload as Record<string, unknown>
+        : null
+      console.info('[chess] history payload', {
+        payloadType: Array.isArray(payload) ? 'array' : typeof payload,
+        payloadKeys: payloadRecord ? Object.keys(payloadRecord).join(',') : undefined,
+        payloadCount: Array.isArray(payload) ? payload.length : undefined,
+        payloadPreview: JSON.stringify(payload).slice(0, 4000),
+      })
+      const stateEntries: ChessHistoryEntry[] = []
+      const visit = (raw: unknown, blockNumber = 0): void => {
+        if (typeof raw === 'string') {
+          visit(JSON.parse(raw), blockNumber)
+          return
+        }
+        if (Array.isArray(raw)) {
+          raw.forEach((item) => visit(item, blockNumber))
+          return
+        }
+        if (!raw || typeof raw !== 'object') return
+        const record = raw as Record<string, unknown>
+        const currentBlock = Number(record.block_number ?? record.blockNumber ?? blockNumber)
+        const candidate = record.value && typeof record.value === 'object' ? record.value : record
+        if (candidate && typeof candidate === 'object' && Array.isArray((candidate as Record<string, unknown>).chess_board)) {
+          stateEntries.push({ block_number: currentBlock, value: candidate as ChessState })
+          return
+        }
+        Object.values(record).forEach((child) => visit(child, currentBlock))
+      }
+      visit(payload)
+      console.info('[chess] parsed history entries', {
+        rawCount: Array.isArray(payload) ? payload.length : 1,
+        stateCount: stateEntries.length,
+        moveCounts: stateEntries.map((entry) => entry.value.chess_move_count ?? 0),
+        latestBoard: stateEntries.at(-1)?.value.chess_board,
+        latestBoardShape: stateEntries.at(-1)?.value.chess_board?.map((row) => typeof row),
+        latestPieces: [...new Set(stateEntries.at(-1)?.value.chess_board?.flat() ?? [])],
+      })
       // Creating and joining write state too, but they are not chess moves.
       // Retain the latest state for each completed-move count.
       const entries = Array.from(
         new Map(stateEntries.map((entry) => [entry.value.chess_move_count ?? 0, entry])).values(),
       )
-      if (entries.length === 0) {
-        throw new Error(`Game "${gameId}" was not found on the local chain`)
-      }
+      //if (entries.length === 0) {
+      //  throw new Error(`Game "${gameId}" was not found on ${env.withdrawChainName}`)
+      //}
       setHistory(entries)
       setHistoryIndex((index) => index < 0 || index === history.length - 1 ? entries.length - 1 : Math.min(index, entries.length - 1))
       setError(null)
@@ -275,17 +315,15 @@ export default function ChessDebugPage() {
       const newTurn = latest?.chess_turn ?? null
       lastMoveCountRef.current = newMoveCount
       lastTurnRef.current = newTurn
-    } catch (reason) {
-      setHistory([])
-      setHistoryIndex(-1)
-      setError(reason instanceof Error ? reason.message : 'Could not load chess state')
-    } finally {
-      setLoading(false)
-    }
-  }, [gameId, history.length, address, toast])
+    //} catch (reason) {
+    //  console.error('[chess] failed to load history', { mode, gameId, prefix, url, reason })
+    //  setHistory([])
+    //  setHistoryIndex(-1)
+    //  setError(reason instanceof Error ? reason.message : 'Could not load chess state')
+    //}
+  }, [env, gameId, history.length, mode])
 
   useEffect(() => {
-    setLoading(true)
     void loadChessHistory()
     const refresh = window.setInterval(() => void loadChessHistory(), 5_000)
     return () => window.clearInterval(refresh)
@@ -320,7 +358,14 @@ export default function ChessDebugPage() {
           ? 'b'
           : null
   const isMyTurn = !gameOver && state?.chess_status === 'chess_active' && myColor !== null && state?.chess_turn === myColor
-  const tradingLocked = state?.chess_status === 'chess_waiting_for_opponent'
+  const latestStatus = latestState?.chess_status
+  const waitingForOpponent = latestStatus === 'chess_waiting_for_opponent'
+  const tradingLocked = waitingForOpponent || gameOver
+  const tradingLockReason = waitingForOpponent
+    ? 'Buying and selling are locked until the opponent joins.'
+    : gameOver
+      ? 'Trading is closed — the game has finished.'
+      : null
 
   const stakeRaw = state?.chess_stake
   const stakeBig =
@@ -346,9 +391,39 @@ export default function ChessDebugPage() {
     enabled: Boolean(address),
     refetchInterval: 5_000,
   })
+  const quoteBalanceQuery = useQuery({
+    queryKey: ['chess-quote-balance', mode, address?.toLowerCase() ?? '', history.length],
+    queryFn: async () => {
+      const addr = (address as string).toLowerCase()
+      const [baseRaw, plainRaw] = await Promise.all([
+        fetchRawState(`base-USDC-balance:${addr}`),
+        fetchRawState(`USDC-balance:${addr}`),
+      ])
+      const base = BigInt(baseRaw || '0')
+      const plain = BigInt(plainRaw || '0')
+      return (base > plain ? base : plain).toString()
+    },
+    enabled: Boolean(address),
+    refetchInterval: 5_000,
+  })
+  const quoteBalance = BigInt(quoteBalanceQuery.data ?? '0')
   const yesRaw = shareBalances.data?.yesRaw ?? '0'
   const noRaw = shareBalances.data?.noRaw ?? '0'
   const fmtShares = (raw: string) => formatAmount(BigInt(raw || '0'), 6, 2)
+
+  const limitPreview = previewLimitOrder({
+    slug: gameId,
+    side: advancedToken,
+    buy: advancedAction === 'buy',
+    price: advancedPrice,
+    amount: advancedAmount,
+    quoteDecimals: 6,
+    quoteLabel: 'USDC',
+    quoteBalance,
+    holding: advancedToken === 'yes' ? BigInt(yesRaw || '0') : BigInt(noRaw || '0'),
+    tokenLabel: advancedToken === 'yes' ? 'White wins' : 'Black wins',
+    marketExists: true,
+  })
 
   const sendMove = useCallback(async (move: string) => {
     setMoveError(null)
@@ -469,6 +544,103 @@ export default function ChessDebugPage() {
       setSendingMove(false)
     }
   }, [address, advancedAmount, chains, env, gameId, sendTransactionAsync, toast, wallet])
+
+  const placeLimitOrder = useCallback(async () => {
+    setMoveError(null)
+    if (!address) {
+      setMoveError('Connect a wallet first.')
+      return
+    }
+    if (!limitPreview.args) {
+      setMoveError(limitPreview.error ?? 'Enter a valid amount.')
+      return
+    }
+    setSendingMove(true)
+    try {
+      const walletOrProvider = wallet ?? (typeof window !== 'undefined' ? (window as { ethereum?: unknown }).ethereum : null)
+      const targetChain = chains.find((item) => item.id === env.withdrawChainId)
+      await ensureWalletChain(walletOrProvider as never, {
+        chainId: env.withdrawChainId,
+        chainName: targetChain?.name ?? env.withdrawChainName,
+        nativeCurrency: targetChain?.nativeCurrency ?? { name: 'Ether', symbol: 'ETH', decimals: 18 },
+        rpcUrls: targetChain?.rpcUrls.default.http ?? [],
+        blockExplorerUrls: targetChain?.blockExplorers?.default
+          ? [targetChain.blockExplorers.default.url]
+          : undefined,
+      })
+      const hash = await sendTransactionAsync({
+        chainId: env.withdrawChainId,
+        account: address as `0x${string}`,
+        to: ZEN_CONTRACT,
+        value: 0n,
+        data: buildZenCallData('chess_predict_limit_order', limitPreview.args),
+      })
+      setTxHash(hash)
+      toast.push({
+        title: `${advancedAction === 'buy' ? 'Buy' : 'Sell'} limit order submitted`,
+        description: `${limitPreview.estShares} ${advancedToken.toUpperCase()} @ ${limitPreview.avgPrice} USDC`,
+        variant: 'success',
+      })
+    } catch (err) {
+      if (!isUserRejected(err)) setMoveError(toErrorMessage(err))
+    } finally {
+      setSendingMove(false)
+    }
+  }, [address, advancedAction, advancedToken, chains, env, limitPreview, sendTransactionAsync, toast, wallet])
+
+  const placeMarketOrder = useCallback(async () => {
+    setMoveError(null)
+    if (!address) {
+      setMoveError('Connect a wallet first.')
+      return
+    }
+    if (tradingLocked) {
+      setMoveError(tradingLockReason ?? 'Trading is locked.')
+      return
+    }
+    const raw = parseUsdcAmount(basicAmount)
+    if (raw === null || raw <= 0n) {
+      setMoveError('Enter a valid USDC amount.')
+      return
+    }
+    if (raw > quoteBalance) {
+      setMoveError('Amount exceeds your available USDC balance.')
+      return
+    }
+    const side = selection === 'black' ? 'no' : 'yes'
+    setSendingMove(true)
+    try {
+      const walletOrProvider = wallet ?? (typeof window !== 'undefined' ? (window as { ethereum?: unknown }).ethereum : null)
+      const targetChain = chains.find((item) => item.id === env.withdrawChainId)
+      await ensureWalletChain(walletOrProvider as never, {
+        chainId: env.withdrawChainId,
+        chainName: targetChain?.name ?? env.withdrawChainName,
+        nativeCurrency: targetChain?.nativeCurrency ?? { name: 'Ether', symbol: 'ETH', decimals: 18 },
+        rpcUrls: targetChain?.rpcUrls.default.http ?? [],
+        blockExplorerUrls: targetChain?.blockExplorers?.default
+          ? [targetChain.blockExplorers.default.url]
+          : undefined,
+      })
+      const hash = await sendTransactionAsync({
+        chainId: env.withdrawChainId,
+        account: address as `0x${string}`,
+        to: ZEN_CONTRACT,
+        value: 0n,
+        data: buildZenCallData('chess_predict_market_order', [gameId, null, side, `-${raw}`]),
+      })
+      setTxHash(hash)
+      toast.push({
+        title: 'Market buy submitted',
+        description: `${basicAmount} USDC · ${side === 'yes' ? 'White wins' : 'Black wins'}`,
+        variant: 'success',
+      })
+      setSubmitted(true)
+    } catch (err) {
+      if (!isUserRejected(err)) setMoveError(toErrorMessage(err))
+    } finally {
+      setSendingMove(false)
+    }
+  }, [address, basicAmount, chains, env, gameId, quoteBalance, selection, sendTransactionAsync, toast, tradingLockReason, tradingLocked, wallet])
 
   const submitMove = useCallback((move: string) => {    setGeneratedCall(JSON.stringify({ p: 'zentest3', f: 'chess_make_move', a: [gameId, move] }))
     setPendingMove(move)
@@ -699,7 +871,7 @@ export default function ChessDebugPage() {
               <button type="button" onClick={() => setPromotionMove(null)} className="mt-2 text-xs text-text underline">Cancel</button>
             </div>
           )}
-          {error ? <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-500"><span>Local chain unavailable: {error}</span><button type="button" onClick={() => void loadChessHistory()} className="shrink-0 font-medium underline">Retry</button></div> : <>
+          {error ? <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-500"><span>{env.withdrawChainName} unavailable: {error}</span><button type="button" onClick={() => void loadChessHistory()} className="shrink-0 font-medium underline">Retry</button></div> : <>
             <p className="mt-3 text-center text-xs text-text">
               {gameOver && resultLabel
                 ? `${resultLabel} · Moves played: ${state?.chess_move_count ?? 0} · block ${activeEntry?.block_number ?? '—'}`
@@ -748,8 +920,19 @@ export default function ChessDebugPage() {
                       ))}
                     </div>
                   </div>
-                  <button type="button" onClick={() => setSubmitted(true)} disabled={tradingLocked} title={tradingLocked ? "Trading is locked until the opponent joins" : undefined} className="mt-3 w-full rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Place {advancedAction === 'buy' ? 'Buy' : 'Sell'} Limit Order</button>
-                  {tradingLocked && <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">Buying and selling are locked until the opponent joins.</p>}
+                  <button type="button" onClick={() => void placeLimitOrder()} disabled={tradingLocked || sendingMove || submitting || !address || !limitPreview.args} title={tradingLockReason ?? undefined} className="mt-3 w-full rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">
+                    {!address
+                      ? 'Connect wallet to trade'
+                      : sendingMove || submitting
+                        ? 'Submitting…'
+                        : `Place ${advancedAction === 'buy' ? 'Buy' : 'Sell'} Limit Order`}
+                  </button>
+                  {tradingLockReason && <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">{tradingLockReason}</p>}
+                  {!tradingLockReason && limitPreview.error && <p className="mt-2 text-xs text-red-500">{limitPreview.error}</p>}
+                  {!tradingLockReason && !limitPreview.error && limitPreview.args && (
+                    <p className="mt-2 text-xs text-text">Est. {limitPreview.estShares} shares for {limitPreview.estQuote} USDC at {limitPreview.avgPrice} USDC.</p>
+                  )}
+                  {moveError && <p className="mt-2 text-xs text-red-500">{moveError}</p>}
                 </>
               ) : (
                 <>
@@ -794,7 +977,9 @@ export default function ChessDebugPage() {
               <span className="text-sm text-text">U</span>
             </div>
           </div>
-          <button type="button" onClick={() => setSubmitted(true)} disabled={tradingLocked} title={tradingLocked ? "Trading is locked until the opponent joins" : undefined} className="mt-5 w-full rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">Buy {selection === 'white' ? 'White wins' : 'Black wins'} · {basicAmount || '0'} U</button>
+          <button type="button" onClick={() => void placeMarketOrder()} disabled={tradingLocked || sendingMove || submitting || !address} title={tradingLockReason ?? undefined} className="mt-5 w-full rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">{!address ? 'Connect wallet to buy' : sendingMove || submitting ? 'Submitting…' : `Buy ${selection === 'white' ? 'White wins' : 'Black wins'} · ${basicAmount || '0'} U`}</button>
+          {tradingLockReason && <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">{tradingLockReason}</p>}
+          {moveError && <p className="mt-2 text-xs text-red-500">{moveError}</p>}
           {submitted && <p role="status" className="mt-3 rounded-lg bg-accent-bg px-3 py-2 text-sm text-accent">Market order submitted: {selection === 'white' ? 'White wins' : 'Black wins'} · {basicAmount || '0'} U</p>}
           <button type="button" onClick={() => { setSelection('white'); setBasicAmount(''); setSubmitted(false) }} className="mt-3 w-full rounded-lg border border-border px-3 py-2 text-xs font-semibold text-text hover:border-accent-border hover:text-text-h">Clear all</button>
             </>

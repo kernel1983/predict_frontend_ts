@@ -65,16 +65,23 @@ export function isEnvConfigured(env: ZentraEnv): boolean {
   return env.indexerUrl !== ''
 }
 
+/** Testnet state namespaces are prefixed with `base-`; local state is not. */
+function normalizeStatePrefix(prefix: string, mode: ChainMode): string {
+  return mode === 'local' || prefix.startsWith('base-') ? prefix : `base-${prefix}`
+}
+
 /**
  * 查询 indexer 上某前缀的原始状态值；不存在返回 null，网络/解析错误抛错。
  * 不展开数组，因为 predict 的订单状态本身就是数组。
  */
 export async function fetchStateValue(prefix: string): Promise<unknown> {
-  const env = ZENTRA_ENVS[useChainModeStore.getState().mode]
+  const mode = useChainModeStore.getState().mode
+  const env = ZENTRA_ENVS[mode]
   if (!isEnvConfigured(env)) {
     throw new Error(`${env.withdrawChainName} is not configured yet.`)
   }
-  const url = `${env.indexerUrl}/api/get_latest_state?prefix=${encodeURIComponent(prefix)}`
+  const statePrefix = normalizeStatePrefix(prefix, mode)
+  const url = `${env.indexerUrl}/api/get_latest_state?prefix=${encodeURIComponent(statePrefix)}`
   const res = await fetch(url)
   if (!res.ok) {
     throw new Error(`Failed to fetch state (${res.status})`)
@@ -154,7 +161,7 @@ export async function fetchPredictMarketProbe(slug: string): Promise<PredictMark
   for (const prefix of prefixes) {
     try {
       const res = await fetch(
-        `${env.indexerUrl}/api/get_latest_state?prefix=${encodeURIComponent(prefix)}`,
+        `${env.indexerUrl}/api/get_latest_state?prefix=${encodeURIComponent(normalizeStatePrefix(prefix, useChainModeStore.getState().mode))}`,
       )
       const text = await res.text()
       const raw = (JSON.parse(text) as { result?: unknown }).result

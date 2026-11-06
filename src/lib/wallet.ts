@@ -72,6 +72,9 @@ async function ensureWalletChainViaProvider(
   provider: EIP1193Provider,
   params: WalletChainParams,
 ): Promise<void> {
+  // Some wallets expose an account in the app before the provider has
+  // authorized it for eth_sendTransaction (especially on localhost chains).
+  await provider.request({ method: 'eth_requestAccounts' })
   if ((await readWalletChainId(provider)) === params.chainId) return
 
   const switchChain = () =>

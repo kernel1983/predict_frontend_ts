@@ -473,7 +473,7 @@ export default function ChessDebugPage() {
       setMoveError('Connect a wallet first.')
       return
     }
-    if (!state?.chess_white || myColor !== null) return
+    if (!state?.chess_white || myColor === 'w') return
     setSendingMove(true)
     try {
       const walletOrProvider = wallet ?? (typeof window !== 'undefined' ? (window as { ethereum?: unknown }).ethereum : null)
@@ -755,14 +755,20 @@ export default function ChessDebugPage() {
             <p className="text-base font-semibold text-amber-700 dark:text-amber-400">
               Waiting for opponent to join
             </p>
-            {!myColor && (
+            {myColor !== 'w' && (
               <button
                 type="button"
                 onClick={() => void joinGame()}
                 disabled={submitting || sendingMove || !address}
                 className="shrink-0 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {!address ? 'Connect wallet to join' : submitting || sendingMove ? 'Joining…' : 'Join game'}
+                {!address
+                  ? 'Connect wallet to join'
+                  : submitting || sendingMove
+                    ? 'Joining…'
+                    : myColor === 'b'
+                      ? 'Join game (Black)'
+                      : 'Join game'}
               </button>
             )}
           </div>
@@ -771,7 +777,9 @@ export default function ChessDebugPage() {
               White: {state?.chess_white ?? '—'}
             </span>
             <span className="shrink-0 text-right font-medium">
-              Black: Waiting
+              {state?.chess_black
+                ? 'Black: pending join'
+                : 'Black: Waiting'}
             </span>
           </div>
           <p className="mt-2 text-left text-xs font-medium text-amber-700 dark:text-amber-400">

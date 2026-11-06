@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import {
   useChains,
-  useDynamicWallet,
+  useMagicWallet,
   useSendTransaction,
   useWaitForTransactionReceipt,
-} from '@/lib/dynamic'
+} from '@/lib/magic'
 import { Button } from '@/components/ui/Button'
 import { useToast } from '@/components/ui/toast-context'
 import { ensureWalletChain, isUserRejected, toErrorMessage } from '@/lib/wallet'
@@ -32,7 +32,7 @@ export function ClaimCard({
   const configured = isEnvConfigured(env)
   const toast = useToast()
 
-  const wallet = useDynamicWallet()
+  const wallet = useMagicWallet()
   const chains = useChains()
   const { sendTransactionAsync, isPending: submitting } = useSendTransaction()
   const [formError, setFormError] = useState<string | null>(null)

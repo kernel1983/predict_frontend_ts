@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { useSignMessage } from '@/lib/dynamic'
+import { useSignMessage } from '@/lib/magic'
 import { useToast } from '@/components/ui/toast-context'
 import { supabase, supabaseConfigured } from '@/lib/supabase'
 

@@ -4,7 +4,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import { ConnectWalletButton } from '@/components/wallet/ConnectWalletButton'
 import { SignInCard } from '@/components/wallet/SignInCard'
 import { WalletModal } from '@/components/wallet/WalletModal'
-import { useAccount, useDynamicContextSafe } from '@/lib/dynamic'
+import { useAccount, useMagicContextSafe, useMagicLogout } from '@/lib/magic'
 import { useAccount as useWagmiAccount, useDisconnect as useWagmiDisconnect } from 'wagmi'
 import { useSession } from '@/hooks/useSession'
 import { clearAuthStorage } from '@/lib/wallet'
@@ -12,12 +12,13 @@ import { clearAuthStorage } from '@/lib/wallet'
 export default function LoginPage() {
   const { user, status } = useSession()
   const { address, isConnected } = useAccount()
-  const dyn = useDynamicContextSafe()
-  const setShowAuthFlow = dyn?.setShowAuthFlow
+  const magic = useMagicContextSafe()
+  const logoutMagic = useMagicLogout()
   const wagmiAccount = useWagmiAccount()
   const { disconnectAsync: wagmiDisconnect } = useWagmiDisconnect()
-  const [opening, setOpening] = useState(false)
   const [walletModalOpen, setWalletModalOpen] = useState(false)
+  const [googlePending, setGooglePending] = useState(false)
+  const [googleError, setGoogleError] = useState<string | null>(null)
 
   if (status === 'loading') {
     return (
@@ -33,16 +34,24 @@ export default function LoginPage() {
 
   const phase = isConnected && address ? 'signin' : 'connect'
 
-  const handleGoogle = () => {
-    setOpening(true)
-    if (wagmiAccount.isConnected) void wagmiDisconnect().catch(() => {})
-    setShowAuthFlow?.(true)
-    window.setTimeout(() => setOpening(false), 1_000)
+  const handleGoogleLogin = async () => {
+    setGoogleError(null)
+    setGooglePending(true)
+    try {
+      if (wagmiAccount.isConnected) void wagmiDisconnect().catch(() => {})
+      // 重定向到 Google；回跳后由 MagicProviders 的 getRedirectResult 完成登录
+      await magic?.loginWithGoogle()
+    } catch (err) {
+      setGooglePending(false)
+      setGoogleError(
+        err instanceof Error ? err.message : 'Google login failed. Please try again.',
+      )
+    }
   }
 
   const handleWalletConnected = () => {
-    // 互斥：登出 Dynamic
-    void dyn?.handleLogOut?.().catch(() => {})
+    // 互斥：登出 Magic 邮箱会话
+    void logoutMagic().catch(() => {})
   }
 
   const handleReset = () => {
@@ -71,10 +80,22 @@ export default function LoginPage() {
             {phase === 'connect' ? (
               <div className="space-y-3">
                 <ConnectWalletButton
-                  loading={opening}
+                  loading={googlePending}
                   label="Continue with Google"
-                  onClick={handleGoogle}
+                  onClick={() => {
+                    void handleGoogleLogin()
+                  }}
                 />
+                {googleError && (
+                  <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-500">
+                    {googleError}
+                  </div>
+                )}
+                <div className="flex items-center gap-3 py-1">
+                  <span className="h-px flex-1 bg-border" />
+                  <span className="text-xs text-text">or</span>
+                  <span className="h-px flex-1 bg-border" />
+                </div>
                 <ConnectWalletButton
                   label="Connect wallet"
                   onClick={() => setWalletModalOpen(true)}
@@ -99,13 +120,13 @@ export default function LoginPage() {
             Can't sign in or out? Reset local state
           </button>
         </div>
-      </div>
 
-      <WalletModal
-        open={walletModalOpen}
-        onClose={() => setWalletModalOpen(false)}
-        onConnected={handleWalletConnected}
-      />
+        <WalletModal
+          open={walletModalOpen}
+          onClose={() => setWalletModalOpen(false)}
+          onConnected={handleWalletConnected}
+        />
+      </div>
     </div>
   )
 }

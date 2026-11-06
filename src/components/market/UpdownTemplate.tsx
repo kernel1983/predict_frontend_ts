@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useAccount } from '@/lib/dynamic'
+import { useAccount } from '@/lib/magic'
 import { useQuery } from '@tanstack/react-query'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { MarketPanel } from '@/components/market/updown/MarketPanel'

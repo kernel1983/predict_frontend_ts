@@ -1,14 +1,14 @@
 import type { ReactNode } from 'react'
-import { dynamicConfigured } from '@/lib/dynamic'
+import { magicConfigured } from '@/lib/magic'
 import { Header } from './Header'
 
 export function AppLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-svh flex-col">
-      {!dynamicConfigured && (
+      {!magicConfigured && (
         <div className="bg-amber-500/10 px-4 py-2 text-center text-xs text-amber-700 dark:text-amber-400">
-          Dynamic is not configured. Set <code>VITE_DYNAMIC_ENVIRONMENT_ID</code> from
-          console.dynamic.xyz, then restart the dev server. Login and wallet features are disabled.
+          Magic is not configured. Set <code>VITE_MAGIC_PUBLISHABLE_KEY</code> from
+          dashboard.magic.link, then restart the dev server. Login and wallet features are disabled.
         </div>
       )}
       <Header />

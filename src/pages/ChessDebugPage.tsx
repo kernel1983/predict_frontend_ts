@@ -5,7 +5,7 @@ import { NewChessGameModal } from '@/components/chess/NewChessGameModal'
 import { cn } from '@/lib/cn'
 import { useToast } from '@/components/ui/toast-context'
 import { useChainModeStore } from '@/store/chainMode'
-import { useAccount, useChains, useDynamicWallet, useSendTransaction } from '@/lib/dynamic'
+import { useAccount, useChains, useMagicWallet, useSendTransaction } from '@/lib/magic'
 import { ensureWalletChain, isUserRejected, toErrorMessage } from '@/lib/wallet'
 import { useQuery } from '@tanstack/react-query'
 import { ZENTRA_ENVS, ZEN_CONTRACT, buildZenCallData, fetchRawState, formatUsdc, parseUsdcAmount } from '@/lib/zentra'
@@ -216,7 +216,7 @@ export default function ChessDebugPage() {
   const chains = useChains()
   const { address } = useAccount()
   const toast = useToast()
-  const wallet = useDynamicWallet()
+  const wallet = useMagicWallet()
   const { sendTransactionAsync, isPending: submitting } = useSendTransaction()
   const lastMoveCountRef = useRef<number | null>(null)
   const lastTurnRef = useRef<'w' | 'b' | null>(null)

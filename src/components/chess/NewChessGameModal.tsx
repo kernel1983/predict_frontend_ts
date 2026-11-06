@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useAccount, useChains, useDynamicWallet, useSendTransaction } from '@/lib/dynamic'
+import { useAccount, useChains, useMagicWallet, useSendTransaction } from '@/lib/magic'
 import { useToast } from '@/components/ui/toast-context'
 import { ensureWalletChain, isAddressLike, isUserRejected, toErrorMessage } from '@/lib/wallet'
 import { ZENTRA_ENVS, ZEN_CONTRACT, buildZenCallData, parseUsdcAmount } from '@/lib/zentra'
@@ -10,7 +10,7 @@ export function NewChessGameModal({ open, onClose }: { open: boolean; onClose: (
   const [amount, setAmount] = useState('0')
   const [inviterAddress, setInviterAddress] = useState('')
   const { address } = useAccount()
-  const wallet = useDynamicWallet()
+  const wallet = useMagicWallet()
   const { sendTransactionAsync, isPending } = useSendTransaction()
   const toast = useToast()
   const mode = useChainModeStore((state) => state.mode)

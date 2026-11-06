@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useAccount } from '@/lib/dynamic'
+import { useAccount } from '@/lib/magic'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { NewChessGameModal } from '@/components/chess/NewChessGameModal'
 import { OngoingChessGames, WaitingChessGames } from '@/components/chess/ChessGames'

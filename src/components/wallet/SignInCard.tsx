@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useChainId, useChains, useDisconnect } from '@/lib/dynamic'
+import { useChainId, useChains, useDisconnect } from '@/lib/magic'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { isWalletNotRegistered, shortAddress, toErrorMessage, clearAuthStorage } from '@/lib/wallet'

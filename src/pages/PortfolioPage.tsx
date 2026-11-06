@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useAccount, useLoginType } from '@/lib/dynamic'
+import { useAccount, useLoginType } from '@/lib/magic'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { DepositModal } from '@/components/wallet/DepositModal'
 import { ClaimCard } from '@/components/wallet/ClaimCard'
@@ -99,8 +99,8 @@ export default function PortfolioPage() {
               Login method
             </p>
             <p className="text-sm text-text-h">
-              {loginType === 'google'
-                ? 'Google (embedded wallet)'
+              {loginType === 'magic'
+                ? 'Google (Magic wallet)'
                 : loginType === 'wallet'
                   ? `Wallet (${connector?.name ?? 'browser wallet'})`
                   : 'Not signed in'}

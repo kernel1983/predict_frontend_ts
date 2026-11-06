@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useAccount, useDynamicWallet, useSendTransaction } from '@/lib/dynamic'
+import { useAccount, useMagicWallet, useSendTransaction } from '@/lib/magic'
 import { useQuery } from '@tanstack/react-query'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { Button } from '@/components/ui/Button'
@@ -91,7 +91,7 @@ export function LiveUpdownTemplate({
   const { price, points } = chart
 
   const { address } = useAccount()
-  const wallet = useDynamicWallet()
+  const wallet = useMagicWallet()
   const { sendTransactionAsync, isPending: mintingUsdG } = useSendTransaction()
   const toast = useToast()
 

@@ -2,10 +2,10 @@ import { useState } from 'react'
 import {
   useAccount,
   useChains,
-  useDynamicWallet,
+  useMagicWallet,
   useSendTransaction,
   waitForReceipt,
-} from '@/lib/dynamic'
+} from '@/lib/magic'
 import { Button } from '@/components/ui/Button'
 import { useToast } from '@/components/ui/toast-context'
 import { ensureWalletChain, isUserRejected, toErrorMessage } from '@/lib/wallet'
@@ -53,7 +53,7 @@ export function MintPanel({
   const toast = useToast()
 
   const { address } = useAccount()
-  const wallet = useDynamicWallet()
+  const wallet = useMagicWallet()
   const chains = useChains()
   const { sendTransactionAsync, isPending: submitting } = useSendTransaction()
 

@@ -8,7 +8,7 @@ export interface WalletChainParams {
   blockExplorerUrls?: readonly string[]
 }
 
-/** Dynamic 钱包的结构化子集（切换网络用） */
+/** Magic 钱包的结构化子集（切换网络用） */
 export interface ChainSwitcherWallet {
   switchNetwork(networkChainId: number | string): Promise<void>
   getNetwork(): Promise<string | number | undefined>
@@ -127,7 +127,7 @@ async function ensureWalletChainViaProvider(
 
 /**
  * Switch the connected wallet to `params.chainId`. Accepts either a raw
- * EIP-1193 provider or a Dynamic wallet (switchNetwork/getNetwork). Waits
+ * EIP-1193 provider, a Magic wallet (switchNetwork/getNetwork), or raw wallet. Waits
  * until the wallet actually reports the target chain.
  */
 export async function ensureWalletChain(
@@ -175,7 +175,7 @@ export function clearAuthStorage(): void {
   for (let i = 0; i < window.localStorage.length; i += 1) {
     const key = window.localStorage.key(i)
     if (!key) continue
-    if (key === 'wagmi.store' || key.startsWith('dynamic_') || key.startsWith('sb-')) {
+    if (key === 'wagmi.store' || key.startsWith('dynamic_') || key.startsWith('magic_') || key.startsWith('sb-')) {
       removals.push(key)
     }
   }

@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useState } from 'react'
-import { useAccount, useDisconnect } from '@/lib/dynamic'
+import { useAccount, useDisconnect } from '@/lib/magic'
 import {
   useConnect,
   useConnectors,

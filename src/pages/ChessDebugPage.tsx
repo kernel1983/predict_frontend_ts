@@ -198,11 +198,51 @@ function applyMove(board: string[][], fr: number, fc: number, tr: number, tc: nu
   return nb
 }
 
+const KING_HOME_COL = 4
+const KING_DEST_COL_KING_SIDE = 6
+const KING_DEST_COL_QUEEN_SIDE = 2
+
+/**
+ * 王车易位可行性：只根据棋盘状态推断（王/车在初始格、路径畅通、
+ * 王未在将军中且经过格不被攻击）。走子权限制由链上引擎最终裁决。
+ */
+function castlingTargets(board: string[][], side: Side): [number, number][] {
+  const kingRow = side === 'w' ? 7 : 0
+  const king = side === 'w' ? 'K' : 'k'
+  const rook = side === 'w' ? 'R' : 'r'
+  const oppSide: Side = side === 'w' ? 'b' : 'w'
+  if (board[kingRow][KING_HOME_COL] !== king) return []
+  if (isInCheck(board, side)) return []
+  const row = board[kingRow]
+  const kingSide =
+    row[7] === rook &&
+    row[5] === '.' &&
+    row[6] === '.' &&
+    !squareAttacked(board, kingRow, 5, oppSide) &&
+    !squareAttacked(board, kingRow, 6, oppSide)
+  const queenSide =
+    row[0] === rook &&
+    row[1] === '.' &&
+    row[2] === '.' &&
+    row[3] === '.' &&
+    !squareAttacked(board, kingRow, 2, oppSide) &&
+    !squareAttacked(board, kingRow, 3, oppSide)
+  const targets: [number, number][] = []
+  if (kingSide) targets.push([kingRow, KING_DEST_COL_KING_SIDE])
+  if (queenSide) targets.push([kingRow, KING_DEST_COL_QUEEN_SIDE])
+  return targets
+}
+
 function legalTargets(board: string[][], r: number, c: number): [number, number][] {
   const p = board[r][c]
   const side = sideOf(p)
   if (!side) return []
   const targets = pseudoMoves(board, r, c)
+  const kingRow = side === 'w' ? 7 : 0
+  const king = side === 'w' ? 'K' : 'k'
+  if (p === king && r === kingRow && c === KING_HOME_COL) {
+    targets.push(...castlingTargets(board, side))
+  }
   return targets.filter(([tr, tc]) => {
     const nb = applyMove(board, r, c, tr, tc)
     return !isInCheck(nb, side)
@@ -331,10 +371,11 @@ export default function ChessDebugPage() {
 
   const activeEntry = history[historyIndex]
   const state = activeEntry?.value
-  const turnLabel =
-    state?.chess_status === 'chess_waiting_for_opponent'
+  const turnLabel = !state
+    ? 'Game not created yet'
+    : state.chess_status === 'chess_waiting_for_opponent'
       ? 'Waiting for opponent to join'
-      : state?.chess_turn === 'w'
+      : state.chess_turn === 'w'
         ? 'White to move'
         : 'Black to move'
   const latestState = history[history.length - 1]?.value
@@ -360,12 +401,14 @@ export default function ChessDebugPage() {
   const isMyTurn = !gameOver && state?.chess_status === 'chess_active' && myColor !== null && state?.chess_turn === myColor
   const latestStatus = latestState?.chess_status
   const waitingForOpponent = latestStatus === 'chess_waiting_for_opponent'
-  const tradingLocked = waitingForOpponent || gameOver
-  const tradingLockReason = waitingForOpponent
-    ? 'Buying and selling are locked until the opponent joins.'
-    : gameOver
-      ? 'Trading is closed — the game has finished.'
-      : null
+  const tradingLocked = !state || waitingForOpponent || gameOver
+  const tradingLockReason = !state
+    ? 'Trading is locked — this game has not been created yet.'
+    : waitingForOpponent
+      ? 'Buying and selling are locked until the opponent joins.'
+      : gameOver
+        ? 'Trading is closed — the game has finished.'
+        : null
 
   const stakeRaw = state?.chess_stake
   const stakeBig =
@@ -715,27 +758,38 @@ export default function ChessDebugPage() {
         mainnet={mode === 'mainnet'}
       />
       <div className={cn(
-        'mt-5 flex flex-wrap items-center justify-between gap-4 rounded-2xl border px-5 py-4 shadow-card',
+        'mt-5 flex flex-wrap items-center justify-end gap-4 rounded-2xl border px-5 py-4 shadow-card',
         isMyTurn ? 'border-accent bg-accent-bg' : 'border-border bg-bg',
       )}>
-        <div className="flex items-center gap-3">
-          <span className={cn(
-            'flex h-11 w-11 items-center justify-center rounded-full text-xl shadow-sm',
-            myColor === 'w' ? 'bg-white text-slate-700' : myColor === 'b' ? 'bg-slate-800 text-white' : 'bg-border text-text',
-          )}>
-            {myColor === 'w' ? '♔' : myColor === 'b' ? '♚' : '♟'}
-          </span>
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wider text-text">Your side</p>
-            <p className="text-lg font-bold text-text-h">
-              {myColor === 'w' ? 'White' : myColor === 'b' ? 'Black' : 'Spectator'}
-            </p>
+        {state && (
+          <div className="flex items-center gap-3">
+            <span className={cn(
+              'flex h-11 w-11 items-center justify-center rounded-full text-xl shadow-sm',
+              myColor === 'w' ? 'bg-white text-slate-700' : myColor === 'b' ? 'bg-slate-800 text-white' : 'bg-border text-text',
+            )}>
+              {myColor === 'w' ? '♔' : myColor === 'b' ? '♚' : '♟'}
+            </span>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wider text-text">Your side</p>
+              <p className="text-lg font-bold text-text-h">
+                {myColor === 'w' ? 'White' : myColor === 'b' ? 'Black' : 'Spectator'}
+              </p>
+            </div>
           </div>
-        </div>
+        )}
         <div className="flex items-center gap-2 rounded-xl px-3 py-2">
-          <span className={cn('h-2.5 w-2.5 rounded-full', isMyTurn ? 'bg-accent shadow-[0_0_10px_rgba(34,197,94,0.8)]' : 'bg-text/40')} />
+          <span className={cn(
+            'h-2.5 w-2.5 rounded-full',
+            isMyTurn ? 'bg-accent shadow-[0_0_10px_rgba(34,197,94,0.8)]' : !state ? 'bg-amber-500' : 'bg-text/40',
+          )} />
           <span className={cn('text-sm font-semibold', isMyTurn ? 'text-accent' : 'text-text')}>
-            {isMyTurn ? 'Your turn to move' : state?.chess_status === 'chess_active' ? `${turnLabel} · Waiting` : turnLabel}
+            {isMyTurn
+              ? 'Your turn to move'
+              : !state
+                ? 'Game not created yet'
+                : state.chess_status === 'chess_active'
+                  ? `${turnLabel} · Waiting`
+                  : turnLabel}
           </span>
         </div>
       </div>
@@ -800,6 +854,12 @@ export default function ChessDebugPage() {
               const isSelected = selected?.r === rankIndex && selected?.c === fileIndex
               const isTarget = selectedTargets.has(`${rankIndex},${fileIndex}`)
               const isCapture = isTarget && !!piece && piece !== '.'
+              const isCastleTarget =
+                isTarget &&
+                !isCapture &&
+                (selected?.r === 7 || selected?.r === 0) &&
+                selected?.c === 4 &&
+                (fileIndex === 2 || fileIndex === 6)
               const canSelect = !!piece && piece !== '.' && isMyTurn && historyIndex === history.length - 1 && sideOf(piece) === state?.chess_turn
               return <div
                 key={square}
@@ -847,6 +907,7 @@ export default function ChessDebugPage() {
                 )}
               >
                 {isTarget && !isCapture && <span className="absolute z-0 h-[28%] w-[28%] rounded-full bg-black/25" />}
+                {isCastleTarget && <span className="absolute inset-[10%] z-0 rounded-full border-4 border-dashed border-black/45" />}
                 {isTarget && isCapture && <span className="absolute inset-[6%] z-0 rounded-full border-4 border-black/35" />}
                 {glyph && <span aria-label={`${piece} on ${square}`} className={cn('relative z-10 text-[clamp(1.7rem,6vw,4.2rem)] leading-none drop-shadow-[0_1px_1px_rgba(0,0,0,0.35)]', piece && piece === piece.toUpperCase() ? 'text-[#fffdf6]' : 'text-[#1c1917]')}>{glyph}</span>}
                 {fileIndex === 0 && <span className="absolute left-1 top-0.5 text-[10px] font-bold text-[#6b4934]">{rank}</span>}
@@ -881,9 +942,11 @@ export default function ChessDebugPage() {
           )}
           {error ? <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-500"><span>{env.withdrawChainName} unavailable: {error}</span><button type="button" onClick={() => void loadChessHistory()} className="shrink-0 font-medium underline">Retry</button></div> : <>
             <p className="mt-3 text-center text-xs text-text">
-              {gameOver && resultLabel
-                ? `${resultLabel} · Moves played: ${state?.chess_move_count ?? 0} · block ${activeEntry?.block_number ?? '—'}`
-                : `${turnLabel} · Moves played: ${state?.chess_move_count ?? 0} · ${state?.chess_result ?? 'Game in progress'} · block ${activeEntry?.block_number ?? '—'}`}
+              {!state
+                ? 'No on-chain state for this game yet.'
+                : gameOver && resultLabel
+                  ? `${resultLabel} · Moves played: ${state?.chess_move_count ?? 0} · block ${activeEntry?.block_number ?? '—'}`
+                  : `${turnLabel} · Moves played: ${state?.chess_move_count ?? 0} · ${state?.chess_result ?? 'Game in progress'} · block ${activeEntry?.block_number ?? '—'}`}
             </p>
             <div className="mt-3 flex items-center justify-center gap-2">
               <button type="button" disabled={historyIndex <= 0} onClick={() => setHistoryIndex((index) => index - 1)} className="rounded-lg border border-border px-3 py-1.5 text-xs text-text transition-colors enabled:hover:border-accent-border disabled:cursor-not-allowed disabled:opacity-40">← Previous</button>
@@ -961,7 +1024,18 @@ export default function ChessDebugPage() {
               Game over — {resultLabel}
             </p>
           )}
-          {!gameOver && state?.chess_status === 'chess_waiting_for_opponent' && (
+      {!state && (
+        <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-center">
+          <p className="text-base font-semibold text-amber-700 dark:text-amber-400">
+            Game {gameId} does not exist yet
+          </p>
+          <p className="mt-1 text-xs text-text">
+            There is no on-chain state for this id on {env.withdrawChainName}.
+            Use “New chess game” to create it — you will become the White side.
+          </p>
+        </div>
+      )}
+      {state && !gameOver && state?.chess_status === 'chess_waiting_for_opponent' && (
             <p className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm font-medium text-amber-700 dark:text-amber-400">
               Waiting for opponent to join — buying and selling are locked until then.
             </p>

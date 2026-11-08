@@ -33,6 +33,8 @@ interface ChessState {
   chess_white?: string
   chess_black?: string | null
   chess_stake?: string | number
+  /** FEN 风格易位权：'K'/'Q'/'k'/'q'，缺失视为全部可用 */
+  chess_castling?: string[] | null
 }
 
 interface ChessHistoryEntry {
@@ -203,24 +205,34 @@ const KING_DEST_COL_KING_SIDE = 6
 const KING_DEST_COL_QUEEN_SIDE = 2
 
 /**
- * 王车易位可行性：只根据棋盘状态推断（王/车在初始格、路径畅通、
- * 王未在将军中且经过格不被攻击）。走子权限制由链上引擎最终裁决。
+ * 王车易位可行性：以链上 `chess_castling` 权限（'K'/'Q'/'k'/'q'）为准，
+ * 叠加棋盘检查（王/车仍在初始格、路径畅通、王未在将军中且经过格不被攻击），
+ * 与链上引擎 _chess_castling_moves 的判定保持一致。权限字段缺失时按全有处理。
  */
-function castlingTargets(board: string[][], side: Side): [number, number][] {
+function castlingTargets(
+  board: string[][],
+  side: Side,
+  rights: string[] | null | undefined,
+): [number, number][] {
   const kingRow = side === 'w' ? 7 : 0
   const king = side === 'w' ? 'K' : 'k'
   const rook = side === 'w' ? 'R' : 'r'
   const oppSide: Side = side === 'w' ? 'b' : 'w'
+  const ksFlag = side === 'w' ? 'K' : 'k'
+  const qsFlag = side === 'w' ? 'Q' : 'q'
+  const activeRights = rights ?? ['K', 'Q', 'k', 'q']
   if (board[kingRow][KING_HOME_COL] !== king) return []
   if (isInCheck(board, side)) return []
   const row = board[kingRow]
   const kingSide =
+    activeRights.includes(ksFlag) &&
     row[7] === rook &&
     row[5] === '.' &&
     row[6] === '.' &&
     !squareAttacked(board, kingRow, 5, oppSide) &&
     !squareAttacked(board, kingRow, 6, oppSide)
   const queenSide =
+    activeRights.includes(qsFlag) &&
     row[0] === rook &&
     row[1] === '.' &&
     row[2] === '.' &&
@@ -233,7 +245,12 @@ function castlingTargets(board: string[][], side: Side): [number, number][] {
   return targets
 }
 
-function legalTargets(board: string[][], r: number, c: number): [number, number][] {
+function legalTargets(
+  board: string[][],
+  r: number,
+  c: number,
+  rights: string[] | null | undefined,
+): [number, number][] {
   const p = board[r][c]
   const side = sideOf(p)
   if (!side) return []
@@ -241,7 +258,7 @@ function legalTargets(board: string[][], r: number, c: number): [number, number]
   const kingRow = side === 'w' ? 7 : 0
   const king = side === 'w' ? 'K' : 'k'
   if (p === king && r === kingRow && c === KING_HOME_COL) {
-    targets.push(...castlingTargets(board, side))
+    targets.push(...castlingTargets(board, side, rights))
   }
   return targets.filter(([tr, tc]) => {
     const nb = applyMove(board, r, c, tr, tc)
@@ -693,8 +710,8 @@ export default function ChessDebugPage() {
 
   const selectedTargets = useMemo(() => {
     if (!selected || !state?.chess_board) return new Set<string>()
-    return new Set(legalTargets(state.chess_board, selected.r, selected.c).map(([r, c]) => `${r},${c}`))
-  }, [selected, state?.chess_board])
+    return new Set(legalTargets(state.chess_board, selected.r, selected.c, state.chess_castling).map(([r, c]) => `${r},${c}`))
+  }, [selected, state?.chess_board, state?.chess_castling])
 
   useEffect(() => {
     setSelected(null)

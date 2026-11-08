@@ -1,7 +1,7 @@
 import { cn } from '@/lib/cn'
-import { useChainModeStore, type ChainMode } from '@/store/chainMode'
+import { isLocalHost, useChainModeStore, type ChainMode } from '@/store/chainMode'
 
-const modes: { value: ChainMode; label: string }[] = [
+const allModes: { value: ChainMode; label: string }[] = [
   { value: 'local', label: 'Local' },
   { value: 'testnet', label: 'Testnet' },
   { value: 'mainnet', label: 'Mainnet' },
@@ -9,6 +9,7 @@ const modes: { value: ChainMode; label: string }[] = [
 
 export function ChainModeSwitch() {
   const { mode, setMode } = useChainModeStore()
+  const modes = allModes.filter((m) => m.value !== 'local' || isLocalHost())
 
   return (
     <div

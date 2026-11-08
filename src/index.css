@@ -72,16 +72,33 @@ code {
 @keyframes chess-ghost-loop {
   0% {
     transform: translate(calc(var(--fc, 0) * 100%), calc(var(--fr, 0) * 100%));
+    opacity: 0.72;
   }
   32% {
     transform: translate(calc(var(--tc, 0) * 100%), calc(var(--tr, 0) * 100%));
+    opacity: 0.72;
   }
-  52% {
+  55% {
     transform: translate(calc(var(--tc, 0) * 100%), calc(var(--tr, 0) * 100%));
+    opacity: 0.72;
   }
-  88%,
+  68% {
+    transform: translate(calc(var(--tc, 0) * 100%), calc(var(--tr, 0) * 100%));
+    opacity: 0;
+  }
+  68.01% {
+    transform: translate(calc(var(--fc, 0) * 100%), calc(var(--fr, 0) * 100%));
+    opacity: 0;
+  }
+  89.99% {
+    opacity: 0;
+  }
+  89.991% {
+    opacity: 0.72;
+  }
   100% {
     transform: translate(calc(var(--fc, 0) * 100%), calc(var(--fr, 0) * 100%));
+    opacity: 0.72;
   }
 }
 

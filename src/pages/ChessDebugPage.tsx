@@ -279,14 +279,14 @@ interface LastMoveInfo {
   piece: string
 }
 
-/** diff 连续棋盘局面找最近一步：普通走子/吃子/过路兵取 (from → to)，易位只取王的部分 */
+/** diff 连续棋盘局面找最近一步：普通走子/过路兵/吃子（目的地前有空子或被吃子）取 (from → to)，易位只取王的部分 */
 function diffLastMove(prevBoard: string[][], nextBoard: string[][], moveCount: number): LastMoveInfo | null {  const fromCands: { square: SquareRef; piece: string }[] = []
   const toCands: { square: SquareRef; piece: string }[] = []
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
       if (prevBoard[r][c] === nextBoard[r][c]) continue
       if (nextBoard[r][c] === '.') fromCands.push({ square: { r, c }, piece: prevBoard[r][c] })
-      else if (prevBoard[r][c] === '.') toCands.push({ square: { r, c }, piece: nextBoard[r][c] })
+      else toCands.push({ square: { r, c }, piece: nextBoard[r][c] })
     }
   }
   if (fromCands.length === 0 || toCands.length === 0) return null

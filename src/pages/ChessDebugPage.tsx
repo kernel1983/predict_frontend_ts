@@ -759,11 +759,12 @@ export default function ChessDebugPage() {
   const [ghostMove, setGhostMove] = useState<LastMoveInfo | null>(null)
 
   // “Your turn to move” 时循环回放对手的最后一步（持续循环直到走子/换页）；刷新页面后重新播放；
-  // 浏览历史/我方走子时不播
+  // Spectator 时无论哪方走的最后一步都循环回放；浏览历史/我方走子时不播
   useEffect(() => {
     const latestMoveCount = latestState?.chess_move_count ?? 0
+    const spectating = myColor === null && latestState?.chess_status === 'chess_active'
     const shouldPlay =
-      isMyTurn &&
+      (isMyTurn || spectating) &&
       !!lastMoveInfo &&
       lastMoveInfo.moveCount === latestMoveCount &&
       historyIndex === history.length - 1 &&

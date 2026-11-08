@@ -266,6 +266,49 @@ function legalTargets(
   })
 }
 
+interface SquareRef {
+  r: number
+  c: number
+}
+
+/** 上一步对局信息（diff 前后棋盘），用于回放动画 */
+interface LastMoveInfo {
+  moveCount: number
+  from: SquareRef
+  to: SquareRef
+  piece: string
+}
+
+/** diff 连续棋盘局面找最近一步：普通走子/吃子/过路兵取 (from → to)，易位只取王的部分 */
+function diffLastMove(prevBoard: string[][], nextBoard: string[][], moveCount: number): LastMoveInfo | null {  const fromCands: { square: SquareRef; piece: string }[] = []
+  const toCands: { square: SquareRef; piece: string }[] = []
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      if (prevBoard[r][c] === nextBoard[r][c]) continue
+      if (nextBoard[r][c] === '.') fromCands.push({ square: { r, c }, piece: prevBoard[r][c] })
+      else if (prevBoard[r][c] === '.') toCands.push({ square: { r, c }, piece: nextBoard[r][c] })
+    }
+  }
+  if (fromCands.length === 0 || toCands.length === 0) return null
+  const to = toCands[0]
+  let from: { square: SquareRef; piece: string } | undefined
+  if (fromCands.length === 2 && toCands.length === 2) {
+    // 王车易位：双方各让出一格、各进入一格，取王的部分
+    from =
+      fromCands.find((item) => item.piece === 'K' || item.piece === 'k') ??
+      fromCands[0]
+    const matchingTo = toCands.find((item) => Math.abs(item.square.c - from!.square.c) === 2)
+    if (matchingTo) return { moveCount, from: from.square, to: matchingTo.square, piece: from.piece }
+    return null
+  }
+  // 普通走子/吃子/过路兵：from 取与落子同色的一方（吃子时 from 候选包含被吃子）
+  const toPiece = to.piece
+  from =
+    fromCands.find((item) => item.piece !== '.' && sideOf(item.piece) === sideOf(toPiece)) ??
+    fromCands[0]
+  return { moveCount, from: from.square, to: to.square, piece: from.piece }
+}
+
 export default function ChessDebugPage() {
   const { gameId = '1' } = useParams()
   const { mode } = useChainModeStore()
@@ -311,21 +354,10 @@ export default function ChessDebugPage() {
   const loadChessHistory = useCallback(async () => {
     const prefix = `${mode === 'local' ? 'chess' : 'base-chess'}-chess_state:${gameId}`
     const url = `${env.indexerUrl}/api/query_recent_state?prefix=${encodeURIComponent(prefix)}`
-    console.info('[chess] loading history', { mode, gameId, prefix, url })
     //try {
       const response = await fetch(url)
-      console.info('[chess] history response', { url, status: response.status, ok: response.ok })
       if (!response.ok) throw new Error(`Node returned ${response.status}`)
       const payload: unknown = await response.json()
-      const payloadRecord = payload && typeof payload === 'object' && !Array.isArray(payload)
-        ? payload as Record<string, unknown>
-        : null
-      console.info('[chess] history payload', {
-        payloadType: Array.isArray(payload) ? 'array' : typeof payload,
-        payloadKeys: payloadRecord ? Object.keys(payloadRecord).join(',') : undefined,
-        payloadCount: Array.isArray(payload) ? payload.length : undefined,
-        payloadPreview: JSON.stringify(payload).slice(0, 4000),
-      })
       const stateEntries: ChessHistoryEntry[] = []
       const visit = (raw: unknown, blockNumber = 0): void => {
         if (typeof raw === 'string') {
@@ -347,14 +379,6 @@ export default function ChessDebugPage() {
         Object.values(record).forEach((child) => visit(child, currentBlock))
       }
       visit(payload)
-      console.info('[chess] parsed history entries', {
-        rawCount: Array.isArray(payload) ? payload.length : 1,
-        stateCount: stateEntries.length,
-        moveCounts: stateEntries.map((entry) => entry.value.chess_move_count ?? 0),
-        latestBoard: stateEntries.at(-1)?.value.chess_board,
-        latestBoardShape: stateEntries.at(-1)?.value.chess_board?.map((row) => typeof row),
-        latestPieces: [...new Set(stateEntries.at(-1)?.value.chess_board?.flat() ?? [])],
-      })
       // Creating and joining write state too, but they are not chess moves.
       // Retain the latest state for each completed-move count.
       const entries = Array.from(
@@ -520,7 +544,6 @@ export default function ChessDebugPage() {
       toast.push({ title: 'Move submitted', description: move, variant: 'success' })
       await loadChessHistory()
     } catch (err) {
-      console.error('[chess] move failed', err)
       if (!isUserRejected(err)) setMoveError(toErrorMessage(err))
     } finally {
       setSendingMove(false)
@@ -713,6 +736,45 @@ export default function ChessDebugPage() {
     return new Set(legalTargets(state.chess_board, selected.r, selected.c, state.chess_castling).map(([r, c]) => `${r},${c}`))
   }, [selected, state?.chess_board, state?.chess_castling])
 
+  /** 最近一步（来自 history diff），move 0（创建/加入）不算。
+   *  以 (最新 block, moveCount) 为缓存键，轮询返回相同内容时不重建，避免动画被无谓重置 */
+  const historyLastKey =
+    history.length > 0
+      ? `${history[history.length - 1]?.block_number}:${history[history.length - 1]?.value.chess_move_count ?? 0}`
+      : 'none'
+  const lastMoveInfo = useMemo<LastMoveInfo | null>(() => {
+    if (history.length === 0) return null
+    const latest = history[history.length - 1]
+    const moveCount = latest?.value.chess_move_count ?? 0
+    if (moveCount === 0 || !latest?.value.chess_board) return null
+    const prevEntry = history
+      .slice(0, -1)
+      .reverse()
+      .find((entry) => (entry.value.chess_move_count ?? 0) === moveCount - 1)
+    if (!prevEntry?.value.chess_board) return null
+    return diffLastMove(prevEntry.value.chess_board, latest.value.chess_board, moveCount)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 以 key 为缓存键，轮询同内容不重建
+  }, [historyLastKey])
+
+  const [ghostMove, setGhostMove] = useState<LastMoveInfo | null>(null)
+
+  // “Your turn to move” 时循环回放对手的最后一步（持续循环直到走子/换页）；刷新页面后重新播放；
+  // 浏览历史/我方走子时不播
+  useEffect(() => {
+    const latestMoveCount = latestState?.chess_move_count ?? 0
+    const shouldPlay =
+      isMyTurn &&
+      !!lastMoveInfo &&
+      lastMoveInfo.moveCount === latestMoveCount &&
+      historyIndex === history.length - 1 &&
+      (myColor === null || sideOf(lastMoveInfo.piece) !== myColor)
+    if (!shouldPlay) {
+      setGhostMove(null)
+      return
+    }
+    setGhostMove(lastMoveInfo)
+  }, [isMyTurn, lastMoveInfo, latestState?.chess_move_count, historyIndex, history.length, myColor, ghostMove])
+
   useEffect(() => {
     setSelected(null)
   }, [state?.chess_move_count, state?.chess_turn, historyIndex])
@@ -862,7 +924,7 @@ export default function ChessDebugPage() {
       )}
       <div className="mt-7 grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_320px]">
         <section aria-label="Chessboard" className="relative mx-auto w-full max-w-[620px]">
-          <div className="overflow-hidden rounded-2xl border-8 border-[#3d2d25] bg-[#3d2d25] shadow-card"><div className="grid grid-cols-8">
+          <div className="relative overflow-hidden rounded-2xl border-8 border-[#3d2d25] bg-[#3d2d25] shadow-card"><div className="grid grid-cols-8">
             {ranks.flatMap((rank, rankIndex) => files.map((file, fileIndex) => {
               const square = `${file}${rank}`
               const dark = (rankIndex + fileIndex) % 2 === 1
@@ -930,8 +992,26 @@ export default function ChessDebugPage() {
                 {fileIndex === 0 && <span className="absolute left-1 top-0.5 text-[10px] font-bold text-[#6b4934]">{rank}</span>}
                 {rankIndex === 7 && <span className="absolute bottom-0 right-1 text-[10px] font-bold text-[#6b4934]">{file}</span>}
               </div>
-            }))}
-          </div></div>
+             }))}
+          </div>
+          {ghostMove && (
+            <span
+              aria-hidden
+              className="chess-ghost-piece flex items-center justify-center"
+              style={{
+                ['--fr' as string]: String(ghostMove.from.r),
+                ['--fc' as string]: String(ghostMove.from.c),
+                ['--tr' as string]: String(ghostMove.to.r),
+                ['--tc' as string]: String(ghostMove.to.c),
+              }}
+            >
+              <span className={cn(
+                'text-[clamp(1.7rem,6vw,4.2rem)] leading-none drop-shadow-[0_1px_1px_rgba(0,0,0,0.35)]',
+                ghostMove.piece === ghostMove.piece.toUpperCase() ? 'text-[#fffdf6]' : 'text-[#1c1917]',
+              )}>{pieceGlyphs[ghostMove.piece]}</span>
+            </span>
+          )}
+          </div>
           {promotionMove && (
             <div
               className="absolute z-20 w-56 -translate-x-1/2 rounded-xl border border-accent-border bg-bg/95 p-3 text-center shadow-2xl backdrop-blur"

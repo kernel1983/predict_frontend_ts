@@ -67,3 +67,31 @@ code {
   font-family: var(--font-mono);
   font-size: 0.9em;
 }
+
+/* Chess last-move ghost replay (ChessDebugPage) */
+@keyframes chess-ghost-loop {
+  0% {
+    transform: translate(calc(var(--fc, 0) * 100%), calc(var(--fr, 0) * 100%));
+  }
+  32% {
+    transform: translate(calc(var(--tc, 0) * 100%), calc(var(--tr, 0) * 100%));
+  }
+  52% {
+    transform: translate(calc(var(--tc, 0) * 100%), calc(var(--tr, 0) * 100%));
+  }
+  88%,
+  100% {
+    transform: translate(calc(var(--fc, 0) * 100%), calc(var(--fr, 0) * 100%));
+  }
+}
+
+.chess-ghost-piece {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 12.5%;
+  height: 12.5%;
+  animation: chess-ghost-loop 2.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  pointer-events: none;
+  opacity: 0.72;
+}

@@ -163,12 +163,16 @@ export default function HomePage() {
           <h1 className="text-2xl font-semibold text-text-h">Markets</h1>
           <p className="mt-1 text-sm text-text">Predict where crypto prices will move next.</p>
         </div>
-        <div className="flex items-center gap-3">
-          <Link to="/portfolio" className="rounded-xl border border-border bg-bg px-3 py-2 text-right shadow-card transition-colors hover:border-accent-border" aria-label="View portfolio">
-            <p className="text-xs text-text">Available</p>
-            <p className="font-mono text-sm font-medium text-text-h">
+        <div className="flex h-10 items-stretch overflow-hidden rounded-xl border border-border bg-bg shadow-card">
+          <Link
+            to="/portfolio"
+            aria-label="View portfolio"
+            className="flex min-w-32 flex-col justify-center px-3"
+          >
+            <span className="text-[10px] leading-3 text-text">Available</span>
+            <span className="font-mono text-xs font-semibold leading-4 text-text-h">
               {balanceLoading ? '…' : balanceError ? '—' : `${formatUsdc(balance ?? 0n, 2)} USDC`}
-            </p>
+            </span>
           </Link>
           <Button size="md" onClick={() => setDepositOpen(true)}>Deposit</Button>
         </div>

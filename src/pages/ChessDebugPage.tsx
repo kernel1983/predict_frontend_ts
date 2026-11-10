@@ -8,7 +8,7 @@ import { useChainModeStore } from '@/store/chainMode'
 import { useAccount, useChains, useMagicWallet, useSendTransaction } from '@/lib/magic'
 import { ensureWalletChain, isUserRejected, toErrorMessage } from '@/lib/wallet'
 import { useQuery } from '@tanstack/react-query'
-import { ZENTRA_ENVS, ZEN_CONTRACT, buildZenCallData, fetchRawState, formatUsdc, parseUsdcAmount } from '@/lib/zentra'
+import { USDC_DECIMALS, ZENTRA_ENVS, ZEN_CONTRACT, buildZenCallData, fetchPredictOrderbook, fetchRawState, formatUsdc, parseUsdcAmount } from '@/lib/zentra'
 import { DepositModal } from '@/components/wallet/DepositModal'
 import { Button } from '@/components/ui/Button'
 import { useUsdcBalance } from '@/hooks/useUsdcBalance'
@@ -491,6 +491,18 @@ export default function ChessDebugPage() {
     refetchInterval: 5_000,
   })
   const quoteBalance = BigInt(quoteBalanceQuery.data ?? '0')
+  const orderbookQuery = useQuery({
+    queryKey: ['chess-orderbook', mode, gameId, state?.chess_move_count ?? 0],
+    queryFn: () => fetchPredictOrderbook(gameId, USDC_DECIMALS, { namespace: 'chess_predict', priceDecimals: 6 }),
+    enabled: Boolean(state),
+    refetchInterval: 5_000,
+  })
+  const whiteWinPrice = orderbookQuery.data?.yes ?? null
+  const blackWinPrice = orderbookQuery.data?.no ?? null
+  const fmtPrice = (price: number | null) =>
+    price === null
+      ? '—'
+      : `$${price.toFixed(2)}`
   const yesRaw = shareBalances.data?.yesRaw ?? '0'
   const noRaw = shareBalances.data?.noRaw ?? '0'
   const fmtShares = (raw: string) => formatAmount(BigInt(raw || '0'), 6, 2)
@@ -725,6 +737,62 @@ export default function ChessDebugPage() {
     }
   }, [address, basicAmount, chains, env, gameId, quoteBalance, selection, sendTransactionAsync, toast, tradingLockReason, tradingLocked, wallet])
 
+  // 一键全仓卖出（market order）：依次 market sell YES / NO 的全部份额
+  const sellAll = useCallback(async () => {
+    setMoveError(null)
+    if (!address) {
+      setMoveError('Connect a wallet first.')
+      return
+    }
+    if (tradingLocked) {
+      setMoveError(tradingLockReason ?? 'Trading is locked.')
+      return
+    }
+    const holdings = (['yes', 'no'] as const)
+      .map((side) => ({ side, raw: side === 'yes' ? yesRaw : noRaw }))
+      .filter((item) => BigInt(item.raw || '0') > 0n)
+    if (holdings.length === 0) {
+      setMoveError('No outcome shares to sell.')
+      return
+    }
+    setSendingMove(true)
+    try {
+      const walletOrProvider = wallet ?? (typeof window !== 'undefined' ? (window as { ethereum?: unknown }).ethereum : null)
+      const targetChain = chains.find((item) => item.id === env.withdrawChainId)
+      await ensureWalletChain(walletOrProvider as never, {
+        chainId: env.withdrawChainId,
+        chainName: targetChain?.name ?? env.withdrawChainName,
+        nativeCurrency: targetChain?.nativeCurrency ?? { name: 'Ether', symbol: 'ETH', decimals: 18 },
+        rpcUrls: targetChain?.rpcUrls.default.http ?? [],
+        blockExplorerUrls: targetChain?.blockExplorers?.default
+          ? [targetChain.blockExplorers.default.url]
+          : undefined,
+      })
+      let lastHash: `0x${string}` | undefined
+      for (const item of holdings) {
+        lastHash = await sendTransactionAsync({
+          chainId: env.withdrawChainId,
+          account: address as `0x${string}`,
+          to: ZEN_CONTRACT,
+          value: 0n,
+          data: buildZenCallData('chess_predict_market_order', [gameId, `-${BigInt(item.raw).toString()}`, item.side, null]),
+        }) as `0x${string}`
+      }
+      setTxHash(lastHash)
+      toast.push({
+        title: 'Sell all submitted',
+        description: holdings.map((item) => `${fmtShares(item.raw)} ${item.side.toUpperCase()}`).join(' + '),
+        variant: 'success',
+      })
+      setSubmitted(true)
+      await loadChessHistory()
+    } catch (err) {
+      if (!isUserRejected(err)) setMoveError(toErrorMessage(err))
+    } finally {
+      setSendingMove(false)
+    }
+  }, [address, chains, env, fmtShares, gameId, loadChessHistory, noRaw, sendTransactionAsync, toast, tradingLockReason, tradingLocked, wallet, yesRaw])
+
   const submitMove = useCallback((move: string) => {    setGeneratedCall(JSON.stringify({ p: 'zentest3', f: 'chess_make_move', a: [gameId, move] }))
     setPendingMove(move)
     setPromotionMove(null)
@@ -813,12 +881,16 @@ export default function ChessDebugPage() {
           <h1 className="mt-3 text-2xl font-semibold text-text-h">Chess match prediction</h1>
           <p className="mt-1 text-sm text-text">On-chain state for {gameId} · choose the result you expect.</p>
         </div>
-        <div className="flex items-center gap-3">
-          <Link to="/portfolio" className="rounded-xl border border-border bg-bg px-3 py-2 text-right shadow-card transition-colors hover:border-accent-border" aria-label="View portfolio">
-            <p className="text-xs text-text">Available</p>
-            <p className="font-mono text-sm font-medium text-text-h">
+        <div className="flex h-10 items-stretch overflow-hidden rounded-xl border border-border bg-bg shadow-card">
+          <Link
+            to="/portfolio"
+            aria-label="View portfolio"
+            className="flex min-w-32 flex-col justify-center px-3"
+          >
+            <span className="text-[10px] leading-3 text-text">Available</span>
+            <span className="font-mono text-xs font-semibold leading-4 text-text-h">
               {balanceLoading ? '…' : balanceError ? '—' : `${formatUsdc(balance ?? 0n, 2)} USDC`}
-            </p>
+            </span>
           </Link>
           <Button size="md" onClick={() => setDepositOpen(true)}>Deposit</Button>
         </div>
@@ -838,38 +910,52 @@ export default function ChessDebugPage() {
         mainnet={mode === 'mainnet'}
       />
       <div className={cn(
-        'mt-5 flex flex-wrap items-center justify-end gap-4 rounded-2xl border px-5 py-4 shadow-card',
+        'mt-5 flex flex-wrap items-center justify-between gap-4 rounded-2xl border px-5 py-4 shadow-card',
         isMyTurn ? 'border-accent bg-accent-bg' : 'border-border bg-bg',
       )}>
-        {state && (
-          <div className="flex items-center gap-3">
-            <span className={cn(
-              'flex h-11 w-11 items-center justify-center rounded-full text-xl shadow-sm',
-              myColor === 'w' ? 'bg-white text-slate-700' : myColor === 'b' ? 'bg-slate-800 text-white' : 'bg-border text-text',
-            )}>
-              {myColor === 'w' ? '♔' : myColor === 'b' ? '♚' : '♟'}
-            </span>
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wider text-text">Your side</p>
-              <p className="text-lg font-bold text-text-h">
-                {myColor === 'w' ? 'White' : myColor === 'b' ? 'Black' : 'Spectator'}
-              </p>
+        <div className="flex flex-wrap items-center gap-6">
+          {state && (
+            <div className="flex items-center gap-3">
+              <span className={cn(
+                'flex h-11 w-11 items-center justify-center rounded-full text-xl shadow-sm ring-1 ring-inset ring-black/10',
+                myColor === 'w' ? 'bg-white text-slate-700' : myColor === 'b' ? 'bg-slate-900 text-white' : 'bg-gray-300 text-slate-600',
+              )}>
+                {myColor === 'w' ? '♔' : myColor === 'b' ? '♚' : '♟'}
+              </span>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wider text-text">Your side</p>
+                <p className="text-lg font-bold text-text-h">
+                  {myColor === 'w' ? 'White' : myColor === 'b' ? 'Black' : 'Spectator'}
+                </p>
+              </div>
             </div>
+          )}
+          <div className="flex items-center gap-2 px-3 py-2">
+            <span className={cn(
+              'h-2.5 w-2.5 rounded-full',
+              isMyTurn ? 'bg-accent shadow-[0_0_10px_rgba(34,197,94,0.8)]' : !state ? 'bg-amber-500' : 'bg-text/40',
+            )} />
+            <span className={cn('text-sm font-semibold', isMyTurn ? 'text-accent' : 'text-text')}>
+              {isMyTurn
+                ? 'Your turn to move'
+                : !state
+                  ? 'Game not created yet'
+                  : state.chess_status === 'chess_active'
+                    ? turnLabel
+                    : turnLabel}
+            </span>
           </div>
-        )}
-        <div className="flex items-center gap-2 rounded-xl px-3 py-2">
-          <span className={cn(
-            'h-2.5 w-2.5 rounded-full',
-            isMyTurn ? 'bg-accent shadow-[0_0_10px_rgba(34,197,94,0.8)]' : !state ? 'bg-amber-500' : 'bg-text/40',
-          )} />
-          <span className={cn('text-sm font-semibold', isMyTurn ? 'text-accent' : 'text-text')}>
-            {isMyTurn
-              ? 'Your turn to move'
-              : !state
-                ? 'Game not created yet'
-                : state.chess_status === 'chess_active'
-                  ? `${turnLabel} · Waiting`
-                  : turnLabel}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="flex items-center gap-2 rounded-xl border border-slate-900 bg-slate-900 px-3 py-1.5 text-sm shadow-sm">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-lg text-slate-800 shadow-sm ring-1 ring-inset ring-black/10">♔</span>
+            <span className="text-xs text-white">White win</span>
+            <span className="font-mono font-semibold text-white">{fmtPrice(whiteWinPrice)}</span>
+          </span>
+          <span className="flex items-center gap-2 rounded-xl border border-border bg-bg px-3 py-1.5 text-sm shadow-sm">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-lg text-white shadow-sm ring-1 ring-inset ring-black/10">♚</span>
+            <span className="text-xs text-text">Black win</span>
+            <span className="font-mono font-semibold text-text-h">{fmtPrice(blackWinPrice)}</span>
           </span>
         </div>
       </div>
@@ -1161,7 +1247,13 @@ export default function ChessDebugPage() {
           {tradingLockReason && <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">{tradingLockReason}</p>}
           {moveError && <p className="mt-2 text-xs text-red-500">{moveError}</p>}
           {submitted && <p role="status" className="mt-3 rounded-lg bg-accent-bg px-3 py-2 text-sm text-accent">Market order submitted: {selection === 'white' ? 'White wins' : 'Black wins'} · {basicAmount || '0'} U</p>}
-          <button type="button" onClick={() => { setSelection('white'); setBasicAmount(''); setSubmitted(false) }} className="mt-3 w-full rounded-lg border border-border px-3 py-2 text-xs font-semibold text-text hover:border-accent-border hover:text-text-h">Clear all</button>
+          <button type="button" onClick={() => void sellAll()} disabled={tradingLocked || sendingMove || submitting || !address || (BigInt(yesRaw || '0') <= 0n && BigInt(noRaw || '0') <= 0n)} title={tradingLockReason ?? undefined} className="mt-3 w-full rounded-lg border border-border px-3 py-2 text-xs font-semibold text-text hover:border-accent-border hover:text-text-h disabled:cursor-not-allowed disabled:opacity-40">
+            {!address
+              ? 'Connect wallet to sell'
+              : sendingMove || submitting
+                ? 'Submitting…'
+                : `Sell all (market order) · ${fmtShares(yesRaw)} YES + ${fmtShares(noRaw)} NO`}
+          </button>
             </>
           )}
           {generatedCall && (

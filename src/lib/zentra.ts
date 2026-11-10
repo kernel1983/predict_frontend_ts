@@ -285,13 +285,25 @@ export interface PredictOrderbookRaw {
   no: PredictOrderbookSide
 }
 
+/** 订单簿查询参数：chess 用命名空间 chess_predict、价格精度 1e6；updown 用默认 predict / 1e18 */
+export interface PredictOrderbookOptions {
+  namespace?: string
+  priceDecimals?: number
+}
+
 /** 查询 indexer 上某个 updown slug 的原始订单簿（调试用） */
-export async function fetchPredictOrderbookRaw(slug: string): Promise<PredictOrderbookRaw | null> {
+export async function fetchPredictOrderbookRaw(
+  slug: string,
+  opts: PredictOrderbookOptions = {},
+): Promise<PredictOrderbookRaw | null> {
   const env = ZENTRA_ENVS[useChainModeStore.getState().mode]
   if (!isEnvConfigured(env)) {
     throw new Error(`${env.withdrawChainName} is not configured yet.`)
   }
-  const url = `${env.indexerUrl}/api/predict_orderbook?slug=${encodeURIComponent(slug)}`
+  const params = new URLSearchParams({ slug })
+  if (opts.namespace) params.set('ns', opts.namespace)
+  if (opts.priceDecimals !== undefined) params.set('dec', String(opts.priceDecimals))
+  const url = `${env.indexerUrl}/api/predict_orderbook?${params.toString()}`
   const res = await fetch(url)
   if (!res.ok) {
     throw new Error(`Failed to fetch orderbook (${res.status})`)
@@ -315,8 +327,9 @@ export async function fetchPredictOrderbookRaw(slug: string): Promise<PredictOrd
 export async function fetchPredictBook(
   slug: string,
   quoteDecimals = USDC_DECIMALS,
+  opts: PredictOrderbookOptions = {},
 ): Promise<PredictBook | null> {
-  const raw = await fetchPredictOrderbookRaw(slug)
+  const raw = await fetchPredictOrderbookRaw(slug, opts)
   if (!raw) return null
   return normalizePredictBook(raw as RawPredictBook, quoteDecimals)
 }
@@ -325,8 +338,9 @@ export async function fetchPredictBook(
 export async function fetchPredictOrderbook(
   slug: string,
   quoteDecimals = USDC_DECIMALS,
+  opts: PredictOrderbookOptions = {},
 ): Promise<PredictOrderbook> {
-  const book = await fetchPredictBook(slug, quoteDecimals)
+  const book = await fetchPredictBook(slug, quoteDecimals, opts)
   return {
     yes: book?.yes.bestAsk ?? null,
     no: book?.no.bestAsk ?? null,

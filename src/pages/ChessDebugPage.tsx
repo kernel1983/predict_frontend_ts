@@ -33,6 +33,8 @@ interface ChessState {
   chess_white?: string
   chess_black?: string | null
   chess_stake?: string | number
+  /** 最近一手落子的 unix 秒时间戳；未走过子时为 null */
+  chess_last_move_time?: number | null
   /** FEN 风格易位权：'K'/'Q'/'k'/'q'，缺失视为全部可用 */
   chess_castling?: string[] | null
 }
@@ -48,12 +50,6 @@ const pieceGlyphs: Record<string, string> = {
   K: '♔', Q: '♕', R: '♖', B: '♗', N: '♘', P: '♙',
   k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟',
 }
-const outcomes: { value: Outcome; title: string; detail: string; odds: string }[] = [
-  { value: 'white', title: 'White wins', detail: 'White wins', odds: '2.10×' },
-  { value: 'draw', title: 'Draw', detail: 'Draw', odds: '3.25×' },
-  { value: 'black', title: 'Black wins', detail: 'Black wins', odds: '2.42×' },
-]
-
 type Side = 'w' | 'b'
 
 function sideOf(piece: string): Side | null {
@@ -373,7 +369,10 @@ export default function ChessDebugPage() {
         const currentBlock = Number(record.block_number ?? record.blockNumber ?? blockNumber)
         const candidate = record.value && typeof record.value === 'object' ? record.value : record
         if (candidate && typeof candidate === 'object' && Array.isArray((candidate as Record<string, unknown>).chess_board)) {
-          stateEntries.push({ block_number: currentBlock, value: candidate as ChessState })
+          stateEntries.push({
+            block_number: currentBlock,
+            value: candidate as ChessState,
+          })
           return
         }
         Object.values(record).forEach((child) => visit(child, currentBlock))
@@ -506,6 +505,44 @@ export default function ChessDebugPage() {
   const yesRaw = shareBalances.data?.yesRaw ?? '0'
   const noRaw = shareBalances.data?.noRaw ?? '0'
   const fmtShares = (raw: string) => formatAmount(BigInt(raw || '0'), 6, 2)
+
+  // 奖池 = 双方 stake escrow（pot_chess_stake）
+  const potQuery = useQuery({
+    queryKey: ['chess-pot', mode, gameId, state?.chess_move_count ?? 0],
+    queryFn: async () => {
+      const maxOf = (values: string[]) => values.map((v) => BigInt(v || '0')).reduce((a, b) => (b > a ? b : a))
+      const [stakeBase, stakePlain] = await Promise.all([
+        fetchRawState(`base-USDC-balance:pot_chess_stake:${gameId}`),
+        fetchRawState(`USDC-balance:pot_chess_stake:${gameId}`),
+      ])
+      return maxOf([stakeBase, stakePlain]).toString()
+    },
+    enabled: Boolean(state),
+    refetchInterval: 5_000,
+  })
+  const potLabel =
+    potQuery.data === undefined
+      ? '…'
+      : `${formatUsdc(BigInt(potQuery.data || '0'), 2)} USDC`
+
+  // 距上次落子时长：用链上 chess_last_move_time（unix 秒），每秒刷新；未走过子时隐藏
+  const lastMoveAtMs =
+    typeof latestState?.chess_last_move_time === 'number' && latestState.chess_last_move_time > 0
+      ? latestState.chess_last_move_time * 1000
+      : undefined
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 1_000)
+    return () => window.clearInterval(id)
+  }, [])
+  const sinceLastMove =
+    lastMoveAtMs !== undefined && lastMoveAtMs <= nowMs
+      ? (() => {
+          const seconds = Math.floor((nowMs - lastMoveAtMs) / 1000)
+          if (seconds < 60) return `${seconds}s`
+          return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+        })()
+      : null
 
   const limitPreview = previewLimitOrder({
     slug: gameId,
@@ -916,46 +953,40 @@ export default function ChessDebugPage() {
         <div className="flex flex-wrap items-center gap-6">
           {state && (
             <div className="flex items-center gap-3">
-              <span className={cn(
-                'flex h-11 w-11 items-center justify-center rounded-full text-xl shadow-sm ring-1 ring-inset ring-black/10',
-                myColor === 'w' ? 'bg-white text-slate-700' : myColor === 'b' ? 'bg-slate-900 text-white' : 'bg-gray-300 text-slate-600',
-              )}>
-                {myColor === 'w' ? '♔' : myColor === 'b' ? '♚' : '♟'}
+              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-xl shadow-sm ring-1 ring-inset ring-black/10">
+                <span className={state.chess_turn === 'w' ? 'text-slate-800' : 'text-black'}>
+                  {state.chess_turn === 'w' ? '♔' : '♚'}
+                </span>
               </span>
               <div>
-                <p className="text-xs font-medium uppercase tracking-wider text-text">Your side</p>
+                <p className="text-xs font-medium uppercase tracking-wider text-text">
+                  {isMyTurn ? 'To move now' : 'Next move'}
+                </p>
                 <p className="text-lg font-bold text-text-h">
-                  {myColor === 'w' ? 'White' : myColor === 'b' ? 'Black' : 'Spectator'}
+                  {state.chess_status === 'chess_waiting_for_opponent'
+                    ? 'Waiting for opponent'
+                    : state.chess_turn === 'w' ? 'White to move' : 'Black to move'}
                 </p>
               </div>
             </div>
           )}
-          <div className="flex items-center gap-2 px-3 py-2">
-            <span className={cn(
-              'h-2.5 w-2.5 rounded-full',
-              isMyTurn ? 'bg-accent shadow-[0_0_10px_rgba(34,197,94,0.8)]' : !state ? 'bg-amber-500' : 'bg-text/40',
-            )} />
-            <span className={cn('text-sm font-semibold', isMyTurn ? 'text-accent' : 'text-text')}>
-              {isMyTurn
-                ? 'Your turn to move'
-                : !state
-                  ? 'Game not created yet'
-                  : state.chess_status === 'chess_active'
-                    ? turnLabel
-                    : turnLabel}
-            </span>
-          </div>
+          {!state && (
+            <div className="flex items-center gap-2 px-3 py-2">
+              <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
+              <span className="text-sm font-semibold text-text">Game not created yet</span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
+          {sinceLastMove && (
+            <span className="flex items-center gap-2 rounded-xl border border-border bg-bg px-3 py-1.5 text-sm shadow-sm">
+              <span className="text-xs text-text">Last move</span>
+              <span className="font-mono font-semibold text-text-h">{sinceLastMove}</span>
+            </span>
+          )}
           <span className="flex items-center gap-2 rounded-xl border border-slate-900 bg-slate-900 px-3 py-1.5 text-sm shadow-sm">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-lg text-slate-800 shadow-sm ring-1 ring-inset ring-black/10">♔</span>
-            <span className="text-xs text-white">White win</span>
-            <span className="font-mono font-semibold text-white">{fmtPrice(whiteWinPrice)}</span>
-          </span>
-          <span className="flex items-center gap-2 rounded-xl border border-border bg-bg px-3 py-1.5 text-sm shadow-sm">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-lg text-white shadow-sm ring-1 ring-inset ring-black/10">♚</span>
-            <span className="text-xs text-text">Black win</span>
-            <span className="font-mono font-semibold text-text-h">{fmtPrice(blackWinPrice)}</span>
+            <span className="text-xs text-white">Prize pool</span>
+            <span className="font-mono font-semibold text-white">{potLabel}</span>
           </span>
         </div>
       </div>
@@ -1224,12 +1255,45 @@ export default function ChessDebugPage() {
               Waiting for opponent to join — buying and selling are locked until then.
             </p>
           )}
-          <div className="mt-4 space-y-2">{outcomes.filter((outcome) => outcome.value !== 'draw').map((outcome) => {
-            const selected = selection === outcome.value
-            return <button key={outcome.value} type="button" onClick={() => { setSelection(outcome.value); setSubmitted(false) }} className={cn('flex w-full items-center justify-between rounded-xl border p-3 text-left transition-colors', selected ? 'border-accent bg-accent-bg' : 'border-border hover:border-accent-border')}><span><span className="block font-medium text-text-h">{outcome.title}</span><span className="text-xs text-text">{outcome.detail}</span></span><span className="font-mono text-sm font-medium text-text-h">{outcome.odds}</span></button>
+          <div className="mt-4 space-y-2">{(['white', 'black'] as const).map((side) => {
+            const selected = selection === side
+            const isWhite = side === 'white'
+            const price = isWhite ? whiteWinPrice : blackWinPrice
+            const dark = isWhite && !selected
+            return <button key={side} type="button" onClick={() => { setSelection(side); setSubmitted(false) }} className={cn(
+              'flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-colors',
+              selected
+                ? 'border-accent bg-gray-100 ring-3 ring-accent/60'
+                : 'border-border hover:border-accent-border',
+              dark ? 'bg-slate-900 text-white' : null,
+            )}>
+              <span className={cn(
+                'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xl shadow-sm ring-1 ring-inset ring-black/10',
+                isWhite ? 'bg-white text-slate-800' : 'bg-white text-black',
+              )}>
+                {isWhite ? '♔' : '♚'}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className={cn('block font-semibold', selected ? 'text-text-h' : dark ? 'text-white' : 'text-text-h')}>{isWhite ? 'White wins' : 'Black wins'}</span>
+                <span className={cn('text-xs', selected ? 'text-text' : dark ? 'text-white/70' : 'text-text')}>{isWhite ? 'Hold YES shares' : 'Hold NO shares'}</span>
+              </span>
+              <span className="shrink-0 text-right">
+                <span className={cn('block font-mono text-sm font-semibold', selected ? 'text-text-h' : dark ? 'text-white' : 'text-text-h')}>{fmtPrice(price)}</span>
+                <span className={cn('text-[10px]', selected ? 'text-text' : dark ? 'text-white/60' : 'text-text')}>buy at</span>
+              </span>
+            </button>
           })}</div>
-          <p className="mt-3 text-xs text-text">
-            Your holdings · <span className="font-mono text-text-h">YES {fmtShares(yesRaw)}</span> · <span className="font-mono text-text-h">NO {fmtShares(noRaw)}</span>
+          <p className="mt-3 flex items-center gap-2 text-xs text-text">
+            Your holdings ·
+            <span className="inline-flex items-center gap-1.5 rounded-xl border border-slate-900 bg-slate-900 px-2 py-0.5 font-mono text-white">
+              <span className="flex h-4 w-4 items-center justify-center rounded-full bg-white text-[10px] text-slate-800">♔</span>
+              {fmtShares(yesRaw)}
+            </span>
+            ·
+            <span className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-bg px-2 py-0.5 font-mono text-text-h">
+              <span className="flex h-4 w-4 items-center justify-center rounded-full bg-white text-[10px] text-black ring-1 ring-inset ring-black/10">♚</span>
+              {fmtShares(noRaw)}
+            </span>
           </p>
           <div className="mt-4">
             <p className="text-xs font-medium text-text">Market order amount</p>

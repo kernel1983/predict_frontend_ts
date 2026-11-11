@@ -2,11 +2,11 @@ import type { Chain } from 'viem'
 import {
   arbitrum,
   base,
-  baseSepolia,
   mainnet,
   optimism,
   polygon,
   sepolia,
+  baseSepolia,
 } from 'viem/chains'
 
 /** Robinhood Chain Testnet（zentra 调试用，viem 未内置） */

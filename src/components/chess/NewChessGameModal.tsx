@@ -66,6 +66,14 @@ export function NewChessGameModal({ open, onClose }: { open: boolean; onClose: (
       toast.push({ title: 'Chess game creation submitted', description: hash.slice(0, 12), variant: 'success' })
       const findGameId = (value: unknown, creationEvent = false): string | null => {
         if (Array.isArray(value)) {
+          // zentra testnet3 event tuple: [func, eventName, ...args]
+          if (value.length >= 3 && typeof value[0] === 'string' && typeof value[1] === 'string') {
+            const eventName = value[1]
+            const isCreationEvent = creationEvent || /(create|created|creation).*game|game.*(create|created|creation)/.test(eventName.toLowerCase())
+            if (isCreationEvent && (typeof value[2] === 'string' || typeof value[2] === 'number')) {
+              return String(value[2])
+            }
+          }
           for (const item of value) {
             const found = findGameId(item, creationEvent)
             if (found) return found

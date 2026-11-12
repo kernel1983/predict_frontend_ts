@@ -906,6 +906,8 @@ export default function ChessDebugPage() {
     notifiedRef.current = key
   }, [myColor, state, gameId, toast, gameOver, historyIndex, history.length])
 
+  const boardFlipped = myColor === 'b'
+
   return (
     <AppLayout>
       <Link to="/" className="text-sm text-accent hover:underline">← Back to markets</Link>
@@ -1043,20 +1045,22 @@ export default function ChessDebugPage() {
       <div className="mt-7 grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_320px]">
         <section aria-label="Chessboard" className="relative mx-auto w-full max-w-[620px]">
           <div className="relative overflow-hidden rounded-2xl border-8 border-[#3d2d25] bg-[#3d2d25] shadow-card"><div className="grid grid-cols-8">
-            {ranks.flatMap((rank, rankIndex) => files.map((file, fileIndex) => {
+            {(boardFlipped ? [1, 2, 3, 4, 5, 6, 7, 8] : ranks).flatMap((rank, dr) => (boardFlipped ? ['h', 'g', 'f', 'e', 'd', 'c', 'b', 'a'] : files).map((file, dc) => {
+              const r = boardFlipped ? 7 - dr : dr
+              const c = boardFlipped ? 7 - dc : dc
               const square = `${file}${rank}`
-              const dark = (rankIndex + fileIndex) % 2 === 1
-              const piece = state?.chess_board?.[rankIndex]?.[fileIndex]
+              const dark = (r + c) % 2 === 1
+              const piece = state?.chess_board?.[r]?.[c]
               const glyph = piece ? pieceGlyphs[piece] : undefined
-              const isSelected = selected?.r === rankIndex && selected?.c === fileIndex
-              const isTarget = selectedTargets.has(`${rankIndex},${fileIndex}`)
+              const isSelected = selected?.r === r && selected?.c === c
+              const isTarget = selectedTargets.has(`${r},${c}`)
               const isCapture = isTarget && !!piece && piece !== '.'
               const isCastleTarget =
                 isTarget &&
                 !isCapture &&
                 (selected?.r === 7 || selected?.r === 0) &&
                 selected?.c === 4 &&
-                (fileIndex === 2 || fileIndex === 6)
+                (c === 2 || c === 6)
               const canSelect = !!piece && piece !== '.' && isMyTurn && historyIndex === history.length - 1 && sideOf(piece) === state?.chess_turn
               return <div
                 key={square}
@@ -1069,17 +1073,17 @@ export default function ChessDebugPage() {
                     setSelected(null)
                     return
                   }
-                  if (selected && selectedTargets.has(`${rankIndex},${fileIndex}`)) {
+                  if (selected && selectedTargets.has(`${r},${c}`)) {
                     const fromSquare = `${files[selected.c]}${ranks[selected.r]}`
-                    const toSquare = `${files[fileIndex]}${ranks[rankIndex]}`
+                    const toSquare = `${files[c]}${ranks[r]}`
                     const movingPiece = state.chess_board?.[selected.r]?.[selected.c] ?? ''
                     let move = `${fromSquare}${toSquare}`
                     const isPromotion =
-                      (movingPiece === 'P' && rankIndex === 0) ||
-                      (movingPiece === 'p' && rankIndex === 7)
+                      (movingPiece === 'P' && r === 0) ||
+                      (movingPiece === 'p' && r === 7)
                     setSelected(null)
                     if (isPromotion) {
-                      setPromotionMove({ move, r: rankIndex, c: fileIndex })
+                      setPromotionMove({ move, r, c })
                     } else {
                       submitMove(move)
                     }
@@ -1088,13 +1092,13 @@ export default function ChessDebugPage() {
                   if (selected) {
                     const sp = state.chess_board?.[selected.r]?.[selected.c]
                     if (piece && piece !== '.' && sideOf(piece) === sideOf(sp ?? '')) {
-                      setSelected({ r: rankIndex, c: fileIndex })
+                      setSelected({ r, c })
                       return
                     }
                     setSelected(null)
                     return
                   }
-                  if (canSelect) setSelected({ r: rankIndex, c: fileIndex })
+                  if (canSelect) setSelected({ r, c })
                 }}
                 className={cn(
                   'relative flex aspect-square items-center justify-center select-none',
@@ -1107,20 +1111,20 @@ export default function ChessDebugPage() {
                 {isCastleTarget && <span className="absolute inset-[10%] z-0 rounded-full border-4 border-dashed border-black/45" />}
                 {isTarget && isCapture && <span className="absolute inset-[6%] z-0 rounded-full border-4 border-black/35" />}
                 {glyph && <span aria-label={`${piece} on ${square}`} className={cn('relative z-10 text-[clamp(1.7rem,6vw,4.2rem)] leading-none drop-shadow-[0_1px_1px_rgba(0,0,0,0.35)]', piece && piece === piece.toUpperCase() ? 'text-[#fffdf6]' : 'text-[#1c1917]')}>{glyph}</span>}
-                {fileIndex === 0 && <span className="absolute left-1 top-0.5 text-[10px] font-bold text-[#6b4934]">{rank}</span>}
-                {rankIndex === 7 && <span className="absolute bottom-0 right-1 text-[10px] font-bold text-[#6b4934]">{file}</span>}
+                {dc === 0 && <span className="absolute left-1 top-0.5 text-[10px] font-bold text-[#6b4934]">{rank}</span>}
+                {dr === 7 && <span className="absolute bottom-0 right-1 text-[10px] font-bold text-[#6b4934]">{file}</span>}
               </div>
              }))}
           </div>
-          {ghostMove && (
+            {ghostMove && (
             <span
               aria-hidden
               className="chess-ghost-piece flex items-center justify-center"
               style={{
-                ['--fr' as string]: String(ghostMove.from.r),
-                ['--fc' as string]: String(ghostMove.from.c),
-                ['--tr' as string]: String(ghostMove.to.r),
-                ['--tc' as string]: String(ghostMove.to.c),
+                ['--fr' as string]: String(boardFlipped ? 7 - ghostMove.from.r : ghostMove.from.r),
+                ['--fc' as string]: String(boardFlipped ? 7 - ghostMove.from.c : ghostMove.from.c),
+                ['--tr' as string]: String(boardFlipped ? 7 - ghostMove.to.r : ghostMove.to.r),
+                ['--tc' as string]: String(boardFlipped ? 7 - ghostMove.to.c : ghostMove.to.c),
               }}
             >
               <span className={cn(
@@ -1134,8 +1138,8 @@ export default function ChessDebugPage() {
             <div
               className="absolute z-20 w-56 -translate-x-1/2 rounded-xl border border-accent-border bg-bg/95 p-3 text-center shadow-2xl backdrop-blur"
               style={{
-                left: `${(promotionMove.c + 0.5) * 12.5}%`,
-                top: promotionMove.r === 0 ? '2%' : '72%',
+                left: `${((boardFlipped ? 7 - promotionMove.c : promotionMove.c) + 0.5) * 12.5}%`,
+                top: (boardFlipped ? 7 - promotionMove.r : promotionMove.r) === 0 ? '2%' : '72%',
               }}
             >
               <p className="text-sm font-semibold text-text-h">Choose promotion</p>

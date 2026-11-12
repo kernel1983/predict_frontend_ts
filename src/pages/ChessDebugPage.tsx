@@ -419,16 +419,28 @@ export default function ChessDebugPage() {
         ? 'White to move'
         : 'Black to move'
   const latestState = history[history.length - 1]?.value
-  const gameOver =
-    latestState?.chess_status === 'chess_checkmate' ||
-    latestState?.chess_status === 'chess_stalemate'
+  const gameOver = latestState?.chess_result != null
   const resultLabel =
     latestState?.chess_result === 'chess_white_wins'
-      ? 'White wins (checkmate)'
+      ? latestState?.chess_status === 'chess_timeout'
+        ? 'White wins (timeout)'
+        : 'White wins (checkmate)'
       : latestState?.chess_result === 'chess_black_wins'
-        ? 'Black wins (checkmate)'
+        ? latestState?.chess_status === 'chess_timeout'
+          ? 'Black wins (timeout)'
+          : 'Black wins (checkmate)'
         : latestState?.chess_result === 'chess_draw'
-          ? 'Draw (stalemate)'
+          ? latestState?.chess_status === 'chess_stalemate'
+            ? 'Draw (stalemate)'
+            : latestState?.chess_status === 'chess_insufficient_material'
+              ? 'Draw (insufficient material)'
+              : latestState?.chess_status === 'chess_fifty_move_rule'
+                ? 'Draw (50-move rule)'
+                : latestState?.chess_status === 'chess_agreed_draw'
+                  ? 'Draw (agreed)'
+                  : latestState?.chess_status === 'chess_timeout'
+                    ? 'Draw (timeout)'
+                    : 'Draw'
           : null
   const myColor: 'w' | 'b' | null =
     !address || !state
@@ -535,14 +547,19 @@ export default function ChessDebugPage() {
     const id = window.setInterval(() => setNowMs(Date.now()), 1_000)
     return () => window.clearInterval(id)
   }, [])
-  const sinceLastMove =
+  const secondsSinceLastMove =
     lastMoveAtMs !== undefined && lastMoveAtMs <= nowMs
-      ? (() => {
-          const seconds = Math.floor((nowMs - lastMoveAtMs) / 1000)
-          if (seconds < 60) return `${seconds}s`
-          return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
-        })()
+      ? Math.floor((nowMs - lastMoveAtMs) / 1000)
       : null
+
+  const countdownSeconds =
+    secondsSinceLastMove === null ? null : Math.max(0, 900 - secondsSinceLastMove)
+  const sinceLastMove =
+    countdownSeconds === null
+      ? null
+      : countdownSeconds < 60
+        ? `${countdownSeconds}s`
+        : `${Math.floor(countdownSeconds / 60)}m ${countdownSeconds % 60}s`
 
   const limitPreview = previewLimitOrder({
     slug: gameId,
@@ -635,6 +652,42 @@ export default function ChessDebugPage() {
       setSendingMove(false)
     }
   }, [address, chains, env, gameId, loadChessHistory, myColor, sendTransactionAsync, state?.chess_white, toast, wallet])
+
+  const claimTimeout = useCallback(async () => {
+    setMoveError(null)
+    if (!address) {
+      setMoveError('Connect a wallet first.')
+      return
+    }
+    setSendingMove(true)
+    try {
+      const walletOrProvider = wallet ?? (typeof window !== 'undefined' ? (window as { ethereum?: unknown }).ethereum : null)
+      const targetChain = chains.find((item) => item.id === env.withdrawChainId)
+      await ensureWalletChain(walletOrProvider as never, {
+        chainId: env.withdrawChainId,
+        chainName: targetChain?.name ?? env.withdrawChainName,
+        nativeCurrency: targetChain?.nativeCurrency ?? { name: 'Ether', symbol: 'ETH', decimals: 18 },
+        rpcUrls: targetChain?.rpcUrls.default.http ?? [],
+        blockExplorerUrls: targetChain?.blockExplorers?.default
+          ? [targetChain.blockExplorers.default.url]
+          : undefined,
+      })
+      const hash = await sendTransactionAsync({
+        chainId: env.withdrawChainId,
+        account: address as `0x${string}`,
+        to: ZEN_CONTRACT,
+        value: 0n,
+        data: buildZenCallData('chess_claim_timeout', [gameId]),
+      })
+      setTxHash(hash)
+      toast.push({ title: 'Claimed timeout', variant: 'success' })
+      await loadChessHistory()
+    } catch (err) {
+      if (!isUserRejected(err)) setMoveError(toErrorMessage(err))
+    } finally {
+      setSendingMove(false)
+    }
+  }, [address, chains, env, gameId, loadChessHistory, sendTransactionAsync, toast, wallet])
 
   const mintTokens = useCallback(async () => {
     setMoveError(null)
@@ -953,11 +1006,15 @@ export default function ChessDebugPage() {
         isMyTurn ? 'border-accent bg-accent-bg' : 'border-border bg-bg',
       )}>
         <div className="flex flex-wrap items-center gap-6">
-          {state && (
+            {state && (
             <div className="flex items-center gap-3">
-              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-xl shadow-sm ring-1 ring-inset ring-black/10">
+              <span className="group relative flex h-11 w-11 items-center justify-center rounded-full bg-white text-xl shadow-sm ring-1 ring-inset ring-black/10">
                 <span className={state.chess_turn === 'w' ? 'text-slate-800' : 'text-black'}>
                   {state.chess_turn === 'w' ? '♔' : '♚'}
+                </span>
+                <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 hidden w-[32rem] -translate-x-[10%] rounded-lg border border-border bg-bg px-3 py-2 text-left text-xs text-text-h shadow-card group-hover:block">
+                  <span className="block font-mono">White: {state.chess_white ?? '—'}{state.chess_white && address && state.chess_white.toLowerCase() === address.toLowerCase() ? ' (You)' : ''}</span>
+                  <span className="block font-mono">Black: {state.chess_black ?? '—'}{state.chess_black && address && state.chess_black.toLowerCase() === address.toLowerCase() ? ' (You)' : ''}</span>
                 </span>
               </span>
               <div>
@@ -980,11 +1037,27 @@ export default function ChessDebugPage() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          {sinceLastMove && (
-            <span className="flex items-center gap-2 rounded-xl border border-border bg-bg px-3 py-1.5 text-sm shadow-sm">
-              <span className="text-xs text-text">Last move</span>
+          {sinceLastMove && !gameOver && secondsSinceLastMove !== null && (
+            <button
+              type="button"
+              onClick={() => {
+                if (secondsSinceLastMove < 900) {
+                  toast.push({ title: 'Not yet', description: 'Need 900s since last move to end game.', variant: 'error' })
+                  return
+                }
+                void claimTimeout()
+              }}
+              disabled={sendingMove}
+              className={cn(
+                'flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm shadow-sm disabled:cursor-not-allowed disabled:opacity-40',
+                secondsSinceLastMove >= 900 ? 'border-accent bg-accent-bg' : 'border-border bg-bg',
+              )}
+            >
+              <span className={cn('text-xs', secondsSinceLastMove >= 900 ? 'text-accent' : 'text-text')}>
+                {secondsSinceLastMove >= 900 ? 'End game' : 'Last move'}
+              </span>
               <span className="font-mono font-semibold text-text-h">{sinceLastMove}</span>
-            </span>
+            </button>
           )}
           <span className="flex items-center gap-2 rounded-xl border border-slate-900 bg-slate-900 px-3 py-1.5 text-sm shadow-sm">
             <span className="text-xs text-white">Prize pool</span>

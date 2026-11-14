@@ -1,5 +1,6 @@
 import { cn } from '@/lib/cn'
 import { isLocalHost, useChainModeStore, type ChainMode } from '@/store/chainMode'
+import { useToast } from '@/components/ui/toast-context'
 
 const allModes: { value: ChainMode; label: string }[] = [
   { value: 'local', label: 'Local' },
@@ -9,6 +10,7 @@ const allModes: { value: ChainMode; label: string }[] = [
 
 export function ChainModeSwitch() {
   const { mode, setMode } = useChainModeStore()
+  const toast = useToast()
   const modes = allModes.filter((m) => m.value !== 'local' || isLocalHost())
 
   return (
@@ -25,7 +27,13 @@ export function ChainModeSwitch() {
             type="button"
             role="tab"
             aria-selected={active}
-            onClick={() => setMode(m.value)}
+            onClick={() => {
+              if (m.value === 'mainnet') {
+                toast.push({ title: 'Mainnet not supported yet', description: 'Please use Local or Testnet.', variant: 'error' })
+                return
+              }
+              setMode(m.value)
+            }}
             className={cn(
               'h-full rounded-full px-3 text-sm transition-colors',
               active

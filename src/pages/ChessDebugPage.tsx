@@ -644,6 +644,22 @@ export default function ChessDebugPage() {
         data: buildZenCallData('chess_join_game', [gameId]),
       })
       setTxHash(hash)
+      // Verify the join actually succeeded on-chain (may fail e.g. insufficient balance).
+      const joinTxHash = hash.startsWith('0x') ? hash.slice(2) : hash
+      let joined = false
+      for (let attempt = 0; attempt < 15 && !joined; attempt += 1) {
+        try {
+          const eventsResponse = await fetch(`${env.indexerUrl}/api/events?txhash=${encodeURIComponent(joinTxHash)}`)
+          if (eventsResponse.ok) {
+            const payload = await eventsResponse.json()
+            if (Array.isArray(payload?.events) && payload.events.length > 0) joined = true
+          }
+        } catch {
+          // indexer may briefly be unavailable while the tx is mined
+        }
+        if (!joined && attempt < 14) await new Promise((resolve) => window.setTimeout(resolve, 2_000))
+      }
+      if (!joined) throw new Error('Join failed (transaction did not produce a game-joined event; check your balance/stake).')
       toast.push({ title: 'Joined game', variant: 'success' })
       await loadChessHistory()
     } catch (err) {

@@ -156,24 +156,29 @@ export default function PortfolioPage() {
           </p>
           <ul className="mt-2 space-y-1.5 text-sm text-text">
             <li>
-              Network:{' '}
+              Currency:{' '}
               <span className="text-text-h">
-                {env.withdrawChainName}
+                {env.withdrawTokens.map((t) => t.token).join(' / ')}
               </span>
             </li>
             <li>
-              Currency: <span className="text-text-h">USDC</span>
+              Network:{' '}
+              <span className="text-text-h">
+                {env.withdrawTokens
+                  .flatMap((t) => t.chains.map((c) => `${t.token} → ${c.chainName}`))
+                  .join(' / ')}
+              </span>
             </li>
             <li>
               Minimum withdrawal:{' '}
-              <span className="text-text-h">{MIN_WITHDRAW_USDC} USDC</span>
+              <span className="text-text-h">{MIN_WITHDRAW_USDC}</span>
             </li>
             <li>
               Destination:{' '}
               <span className="break-all font-mono text-text-h">
                 {address ?? '—'}
               </span>{' '}
-              (your controlling wallet on {env.withdrawChainName})
+              (your controlling wallet on the selected network)
             </li>
           </ul>
         </div>

@@ -34,6 +34,29 @@ export interface ZentraEnv {
   explorerBase: string
   /** 是否允许向 indexer 免费领取测试币 */
   mintEnabled: boolean
+  /**
+   * 提现选项：先选币种，再选该币种可提现到的链。
+   * 提现 tx 始终发往 Zentra（withdrawChainId），此处仅决定资金出金到哪条链
+   * （与 backend worker_withdraw_* 的 dest_chain 对应）。
+   */
+  withdrawTokens: WithdrawTokenOption[]
+}
+
+export interface WithdrawTokenOption {
+  token: QuoteToken
+  /** 该币种可出金的链列表 */
+  chains: WithdrawChain[]
+}
+
+export interface WithdrawChain {
+  /** dest_chain 标识（worker_withdraw_basesepolia -> base_sepolia / worker_withdraw_rhtestnet -> rh_testnet） */
+  id: string
+  /** bridge_outgoing calldata 里的链标识：base_sepolia=base / rh=rh */
+  chainKey: string
+  /** 资金最终到账的链 */
+  chainId: number
+  chainName: string
+  explorerBase: string
 }
 
 export const ZENTRA_ENVS: Record<ChainMode, ZentraEnv> = {
@@ -43,6 +66,20 @@ export const ZENTRA_ENVS: Record<ChainMode, ZentraEnv> = {
     withdrawChainName: 'Local Zentra',
     explorerBase: '',
     mintEnabled: true,
+    withdrawTokens: [
+      {
+        token: 'USDC',
+        chains: [
+          {
+            id: 'local',
+            chainKey: 'local',
+            chainId: 31337,
+            chainName: 'Local Zentra',
+            explorerBase: '',
+          },
+        ],
+      },
+    ],
   },
   testnet: {
     indexerUrl: 'https://testnet3.zentra.dev',
@@ -50,6 +87,32 @@ export const ZENTRA_ENVS: Record<ChainMode, ZentraEnv> = {
     withdrawChainName: 'Base Sepolia',
     explorerBase: 'https://sepolia.basescan.org',
     mintEnabled: true,
+    withdrawTokens: [
+      {
+        token: 'USDC',
+        chains: [
+          {
+            id: 'base_sepolia',
+            chainKey: 'base',
+            chainId: 84532,
+            chainName: 'Base Sepolia',
+            explorerBase: 'https://sepolia.basescan.org',
+          },
+        ],
+      },
+      {
+        token: 'USDG',
+        chains: [
+          {
+            id: 'rh',
+            chainKey: 'rh',
+            chainId: 46630,
+            chainName: 'RH Testnet',
+            explorerBase: 'https://explorer.testnet.chain.robinhood.com',
+          },
+        ],
+      },
+    ],
   },
   mainnet: {
     indexerUrl: '',
@@ -57,6 +120,20 @@ export const ZENTRA_ENVS: Record<ChainMode, ZentraEnv> = {
     withdrawChainName: 'Base',
     explorerBase: 'https://basescan.org',
     mintEnabled: false,
+    withdrawTokens: [
+      {
+        token: 'USDC',
+        chains: [
+          {
+            id: 'base',
+            chainKey: 'base',
+            chainId: 8453,
+            chainName: 'Base',
+            explorerBase: 'https://basescan.org',
+          },
+        ],
+      },
+    ],
   },
 }
 
@@ -253,6 +330,14 @@ export async function fetchUsdgBalance(address: Address): Promise<bigint> {
   return BigInt(await fetchRawState(`base-USDG-balance:${address.toLowerCase()}`))
 }
 
+/** 按 quote 币种查询 rollup 内部余额 */
+export async function fetchQuoteTokenBalance(
+  address: Address,
+  token: QuoteToken,
+): Promise<bigint> {
+  return token === 'USDG' ? fetchUsdgBalance(address) : fetchUsdcBalance(address)
+}
+
 export interface PredictOrderbook {
   /** bestAsk：买入一档（吃单卖一）价格，美元 */
   yes: number | null
@@ -447,9 +532,16 @@ export function buildLimitOrderCancelData(
   return buildZenCallData('predict_limit_order_cancel', [slug, token, side, orderId])
 }
 
-/** 提现：桥接 USDC 到 base（burn rollup 余额，operator 在 L1 出金） */
-export function buildBridgeOutgoingData(amount: bigint): Hex {
-  return buildZenCallData('bridge_outgoing', ['USDC', amount.toString(), 'base'])
+/**
+ * 提现：桥接 rollup 余额到目标链（burn 余额，operator 在目标链出金）。
+ * token 必须与 dest 链上的出金币种一致：base=USDC，rh=USDG。
+ */
+export function buildBridgeOutgoingData(
+  amount: bigint,
+  token: QuoteToken = 'USDC',
+  destChain = 'base',
+): Hex {
+  return buildZenCallData('bridge_outgoing', [token, amount.toString(), destChain])
 }
 
 /** 免费铸造测试币：向 indexer 申请 amount 单位的模拟 USDC/USDG（仅 testnet） */

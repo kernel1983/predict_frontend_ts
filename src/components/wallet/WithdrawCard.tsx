@@ -8,7 +8,7 @@ import {
 import { type Address } from 'viem'
 import { Button } from '@/components/ui/Button'
 import { useToast } from '@/components/ui/toast-context'
-import { useUsdcBalance } from '@/hooks/useUsdcBalance'
+import { useQuoteTokenBalance } from '@/hooks/useQuoteTokenBalance'
 import { isUserRejected, toErrorMessage } from '@/lib/wallet'
 import {
   ZEN_CONTRACT,
@@ -18,19 +18,28 @@ import {
   isEnvConfigured,
   parseUsdcAmount,
 } from '@/lib/zentra'
+import { type QuoteToken } from '@/lib/market'
 import { useChainModeStore } from '@/store/chainMode'
 
 export function WithdrawCard({ address }: { address: Address | undefined }) {
   const mode = useChainModeStore((s) => s.mode)
   const env = ZENTRA_ENVS[mode]
   const configured = isEnvConfigured(env)
+  const tokenOptions = env.withdrawTokens
+  const [token, setToken] = useState<QuoteToken>(tokenOptions[0]?.token ?? 'USDC')
+  const tokenOption =
+    tokenOptions.find((t) => t.token === token) ?? tokenOptions[0]
+  const chains = tokenOption?.chains ?? []
+  const [chainId, setChainId] = useState(chains[0]?.id ?? '')
+  const chain = chains.find((c) => c.id === chainId) ?? chains[0]
+  const destToken = tokenOption?.token ?? 'USDC'
   const toast = useToast()
   const {
     data: balance,
     isLoading,
     error: balanceError,
     refetch,
-  } = useUsdcBalance(address)
+  } = useQuoteTokenBalance(address, destToken)
   const { sendTransactionAsync, isPending: submitting } = useSendTransaction()
   const { switchChainAsync } = useSwitchChain()
   const currentChainId = useChainId()
@@ -41,11 +50,33 @@ export function WithdrawCard({ address }: { address: Address | undefined }) {
   const { data: receipt } = useWaitForTransactionReceipt({
     hash: txHash,
     confirmations: 1,
+    chainId: env.withdrawChainId,
   })
+
+  const selectToken = (value: QuoteToken) => {
+    if (value === destToken) return
+    setToken(value)
+    setTxHash(undefined)
+    setFormError(null)
+    setAmountInput('')
+    const next = tokenOptions.find((t) => t.token === value)
+    const nextChain = next?.chains.find((c) => c.id === chainId) ?? next?.chains[0]
+    if (nextChain && nextChain.id !== chainId) {
+      setChainId(nextChain.id)
+    }
+  }
+
+  const selectChain = (id: string) => {
+    if (id === chain?.id) return
+    setChainId(id)
+    setTxHash(undefined)
+    setFormError(null)
+    setAmountInput('')
+  }
 
   const handleSubmit = async () => {
     setFormError(null)
-    if (!address || !configured) return
+    if (!address || !configured || !chain) return
     const raw = parseUsdcAmount(amountInput)
     const bal = balance ?? 0n
     if (raw === null || raw <= 0n) {
@@ -64,7 +95,7 @@ export function WithdrawCard({ address }: { address: Address | undefined }) {
         chainId: env.withdrawChainId,
         to: ZEN_CONTRACT,
         value: 0n,
-        data: buildBridgeOutgoingData(raw),
+        data: buildBridgeOutgoingData(raw, destToken, chain.chainKey),
       })
       setTxHash(hash)
       setAmountInput('')
@@ -91,22 +122,69 @@ export function WithdrawCard({ address }: { address: Address | undefined }) {
   return (
     <div className="rounded-2xl border border-border bg-bg p-5 shadow-card">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold text-text-h">Withdraw USDC</h2>
+        <h2 className="text-base font-semibold text-text-h">
+          Withdraw {destToken}
+        </h2>
         <span className="rounded-full bg-accent-bg px-2.5 py-0.5 text-xs font-medium text-accent">
-          {env.withdrawChainName}
+          {chain?.chainName}
         </span>
       </div>
       <p className="mt-1 text-xs text-text">
-        Bridge USDC from the indexer back to {env.withdrawChainName}. The
-        transaction is always sent to {env.withdrawChainName}, regardless of
-        your wallet's current network — approve the network switch if prompted.
+        Bridge {destToken} from the indexer back to {chain?.chainName}. The
+        transaction is always sent to Zentra on {env.withdrawChainName},
+        regardless of your wallet's current network — approve the network
+        switch if prompted. Funds arrive on {chain?.chainName} after the
+        operator processes the withdrawal.
       </p>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <div>
+          <label className="block text-xs text-text" htmlFor="withdraw-token">
+            Currency
+          </label>
+          <select
+            id="withdraw-token"
+            value={destToken}
+            disabled={submitting}
+            onChange={(e) => selectToken(e.target.value as QuoteToken)}
+            className="mt-1.5 h-11 w-full rounded-xl border border-border bg-bg px-3 text-sm text-text-h outline-none transition-colors focus:border-accent-border disabled:opacity-60"
+          >
+            {tokenOptions.map((t) => (
+              <option key={t.token} value={t.token}>
+                {t.token}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-text" htmlFor="withdraw-chain">
+            Withdraw to
+          </label>
+          <select
+            id="withdraw-chain"
+            value={chain?.id ?? ''}
+            disabled={submitting || !chain}
+            onChange={(e) => selectChain(e.target.value)}
+            className="mt-1.5 h-11 w-full rounded-xl border border-border bg-bg px-3 text-sm text-text-h outline-none transition-colors focus:border-accent-border disabled:opacity-60"
+          >
+            {chains.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.chainName}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       <div className="mt-4 rounded-xl border border-border bg-bg p-3">
         <div className="flex items-center justify-between">
           <p className="text-xs text-text">Available balance</p>
           <p className="font-mono text-sm text-text-h">
-            {isLoading ? '…' : balanceError ? '—' : `${formatUsdc(balance ?? 0n, 2)} USDC`}
+            {isLoading
+              ? '…'
+              : balanceError
+                ? '—'
+                : `${formatUsdc(balance ?? 0n, 2)} ${destToken}`}
           </p>
         </div>
         {balanceError && (
@@ -142,8 +220,8 @@ export function WithdrawCard({ address }: { address: Address | undefined }) {
 
       {!configured && (
         <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
-          {env.withdrawChainName} is not configured yet. The production
-          indexer details are pending.
+          {env.withdrawChainName} is not configured yet. The production indexer
+          details are pending.
         </div>
       )}
 
@@ -185,7 +263,7 @@ export function WithdrawCard({ address }: { address: Address | undefined }) {
         size="lg"
         className="mt-4 w-full"
         loading={submitting}
-        disabled={!configured || !address || !!receipt}
+        disabled={!configured || !address || !!receipt || !chain}
         onClick={() => {
           void handleSubmit()
         }}

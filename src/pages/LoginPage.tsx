@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { Spinner } from '@/components/ui/Spinner'
 import { ConnectWalletButton } from '@/components/wallet/ConnectWalletButton'
 import { SignInCard } from '@/components/wallet/SignInCard'
@@ -62,15 +62,15 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-svh items-center justify-center bg-bg px-4 py-10">
       <div className="w-full max-w-md">
-        <div className="mb-8 flex items-center justify-center gap-2 text-xl font-semibold text-text-h">
+        <Link to="/" className="mb-8 flex items-center justify-center gap-2 text-xl font-semibold text-text-h">
           <span className="flex size-8 items-center justify-center rounded-lg bg-accent text-base font-bold text-white">
-            P
+            C
           </span>
-          predict
-        </div>
+          chess
+        </Link>
 
         <div className="rounded-2xl border border-border bg-bg p-6 shadow-card">
-          <h1 className="text-xl font-semibold text-text-h">Sign in to predict</h1>
+          <h1 className="text-xl font-semibold text-text-h">Sign in to chess</h1>
           <p className="mb-6 mt-1.5 text-sm text-text">
             Continue with Google or a Web3 wallet — new accounts get a wallet
             created automatically.

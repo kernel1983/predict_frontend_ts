@@ -16,7 +16,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         {children}
       </main>
       <footer className="border-t border-border py-6 text-center text-xs text-text">
-        powered by predict · Participate at your own risk
+        powered by chess · Participate at your own risk
       </footer>
     </div>
   )

@@ -30,12 +30,12 @@ import {
   isNotLive,
   isSteady,
   isUpdown,
-  marketId,
   parseMarketId,
   type Market,
 } from '@/lib/market'
 import { supabaseConfigured, type MarketRow } from '@/lib/supabase'
 import { useChainModeStore } from '@/store/chainMode'
+import { gameHttpUrl } from '@/lib/gameUrls'
 
 const TONES: Record<string, PredictionTone> = {
   btc: 'orange',
@@ -49,10 +49,6 @@ const TONE_FALLBACK: PredictionTone = 'green'
 interface MarketCard {
   id: string
   market: PredictionMarket
-}
-
-function marketPath(market: PredictionMarket): string {
-  return `/market/${marketId(market.market)}`
 }
 
 function formatPrice(value: number | null | undefined): string {
@@ -130,6 +126,7 @@ export default function HomePage() {
   const [depositOpen, setDepositOpen] = useState(false)
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   const [showNewChessGame, setShowNewChessGame] = useState(false)
+  const [casualGames, setCasualGames] = useState<{ id: string; status: string; players: { white: boolean; black: boolean }; moves: number }[]>([])
   const { data: balance, isLoading: balanceLoading, error: balanceError } = useUsdcBalance(address)
   const { data: rows, isPending: marketsLoading, error: marketsError } = useMarkets()
   const { data: quotes } = useAssetCtxs()
@@ -140,6 +137,23 @@ export default function HomePage() {
     return () => clearInterval(timer)
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await fetch(`${gameHttpUrl(mode)}/games`)
+        if (!res.ok) return
+        const data = await res.json()
+        if (!cancelled && Array.isArray(data.games)) setCasualGames(data.games)
+      } catch {
+        /* server may be down */
+      }
+    }
+    void load()
+    const id = setInterval(load, 5000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
+
   const cards = useMemo(
     () =>
       (rows ?? [])
@@ -148,7 +162,6 @@ export default function HomePage() {
     [rows, quotes, now],
   )
 
-  const [featured, ...more] = cards
   const predicted = address
     ? factories.map((config) => ({
         config,
@@ -163,31 +176,58 @@ export default function HomePage() {
           <h1 className="text-2xl font-semibold text-text-h">Markets</h1>
           <p className="mt-1 text-sm text-text">Predict where crypto prices will move next.</p>
         </div>
-        <div className="flex h-10 items-stretch overflow-hidden rounded-xl border border-border bg-bg shadow-card">
-          <Link
-            to="/portfolio"
-            aria-label="View portfolio"
-            className="flex min-w-32 flex-col justify-center px-3"
-          >
-            <span className="text-[10px] leading-3 text-text">Available</span>
-            <span className="font-mono text-xs font-semibold leading-4 text-text-h">
-              {balanceLoading ? '…' : balanceError ? '—' : `${formatUsdc(balance ?? 0n, 2)} USDC`}
-            </span>
-          </Link>
-          <Button size="md" onClick={() => setDepositOpen(true)}>Deposit</Button>
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex h-10 items-stretch overflow-hidden rounded-xl border border-border bg-bg shadow-card">
+            <Link
+              to="/portfolio"
+              aria-label="View portfolio"
+              className="flex min-w-32 flex-col justify-center px-3"
+            >
+              <span className="text-[10px] leading-3 text-text">Available</span>
+              <span className="font-mono text-xs font-semibold leading-4 text-text-h">
+                {balanceLoading ? '…' : balanceError ? '—' : `${formatUsdc(balance ?? 0n, 2)} USDC`}
+              </span>
+            </Link>
+            <Button size="md" onClick={() => setDepositOpen(true)}>Deposit</Button>
+          </div>
+          <button type="button" onClick={() => setShowNewChessGame(true)} className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90">
+            + New chess game
+          </button>
         </div>
       </div>
 
       <section className="mt-6">
+        <div className="rounded-2xl border border-border bg-bg p-5 shadow-card">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-text-h">Casual Games</h2>
+              <p className="mt-1 text-sm text-text">Play instantly on the server, no wallet or login required.</p>
+            </div>
+
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {casualGames.length === 0 && <p className="text-sm text-text">No casual games yet.</p>}
+            {casualGames.map((g) => (
+              <Link key={g.id} to={`/casual-chess/${g.id}`} className="flex items-center gap-4 rounded-xl border border-border bg-bg px-4 py-3 shadow-card transition-colors hover:border-accent-border">
+                <span className="text-2xl leading-none" aria-hidden="true">♞</span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-mono text-sm font-medium text-text-h">Game {g.id.slice(0, 8)}</p>
+                  <p className="mt-0.5 text-xs text-text">Moves {g.moves} · {g.players.white ? 'W' : '·'} {g.players.black ? 'B' : '·'}</p>
+                </div>
+                <span className="rounded-full border border-accent-border px-2 py-0.5 text-xs font-medium text-accent">{g.status}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="mt-6">
         <div className="rounded-2xl border border-accent-border bg-accent-bg p-5">
-          <button type="button" onClick={() => setShowNewChessGame(true)} className="mb-4 ml-auto block w-fit rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90">
-            + New chess game
-          </button>
           <div className="flex items-center gap-4">
             <span className="text-4xl leading-none" aria-hidden="true">♞</span>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-semibold text-text-h">Chess match</h2>
+                <h2 className="text-lg font-semibold text-text-h">Onchain Games</h2>
                 <span className="rounded-full border border-accent-border px-2 py-0.5 text-xs font-medium text-accent">GAME</span>
               </div>
               <p className="mt-1 text-sm text-text">Predict white win, draw, or black win.</p>
@@ -227,29 +267,6 @@ export default function HomePage() {
 
       <OngoingChessGames />
 
-      {featured && (
-        <section className="mt-8">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold text-text-h">Featured market</h2>
-            <span className="text-xs text-text">Short-term · settles soon</span>
-          </div>
-          <PredictionCard market={featured.market} featured to={marketPath(featured.market)} />
-        </section>
-      )}
-
-      {more.length > 0 && (
-        <section className="mt-8">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold text-text-h">More predictions</h2>
-            <span className="text-xs text-text">New markets update regularly</span>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {more.map((card) => (
-              <PredictionCard key={card.id} market={card.market} to={marketPath(card.market)} />
-            ))}
-          </div>
-        </section>
-      )}
 
       {mode === 'testnet' && (
         <section className="mt-8">

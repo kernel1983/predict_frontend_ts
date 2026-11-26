@@ -11,9 +11,9 @@ export function Header() {
           className="flex items-center gap-2 text-lg font-semibold tracking-tight text-text-h"
         >
           <span className="flex size-7 items-center justify-center rounded-lg bg-accent text-sm font-bold text-white">
-            P
+            C
           </span>
-          predict
+          chess
         </Link>
         <div className="flex items-center gap-3">
           <ChainModeSwitch />

@@ -1,15 +1,21 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
-import { useAccount, useChains, useMagicWallet, useSendTransaction } from '@/lib/magic'
+import { Link, useNavigate } from 'react-router-dom'
 import { useToast } from '@/components/ui/toast-context'
 import { ensureWalletChain, isAddressLike, isUserRejected, toErrorMessage } from '@/lib/wallet'
 import { ZENTRA_ENVS, ZEN_CONTRACT, buildZenCallData, parseUsdcAmount } from '@/lib/zentra'
 import { useChainModeStore } from '@/store/chainMode'
+import { gameHttpUrl } from '@/lib/gameUrls'
+import { useAccount, useChains, useMagicWallet, useSendTransaction, useSignMessage } from '@/lib/magic'
+import { getAnonymousCasualAccount } from '@/lib/casualIdentity'
 
 export function NewChessGameModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [gameType, setGameType] = useState<'onchain' | 'casual'>('onchain')
   const [amount, setAmount] = useState('0')
   const [inviterAddress, setInviterAddress] = useState('')
+  const navigate = useNavigate()
   const { address } = useAccount()
+  const { address: walletAddress } = useAccount()
+  const { signMessageAsync } = useSignMessage()
   const wallet = useMagicWallet()
   const { sendTransactionAsync, isPending } = useSendTransaction()
   const toast = useToast()
@@ -151,19 +157,60 @@ export function NewChessGameModal({ open, onClose }: { open: boolean; onClose: (
           </div>
           <button type="button" onClick={onClose} className="text-sm text-text hover:text-text-h">✕</button>
         </div>
-        <div className="mt-4 grid gap-3">
-          <label className="block">
-            <span className="block text-xs font-medium text-text">Amount (USDC)</span>
-            <input value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" placeholder="0" className="mt-1 h-10 w-full rounded-lg border border-border bg-bg px-3 text-sm text-text-h" />
-          </label>
-          <label className="block">
-            <span className="block text-xs font-medium text-text">Inviter address (optional)</span>
-            <input value={inviterAddress} onChange={(event) => setInviterAddress(event.target.value)} placeholder="0x… inviter address" className="mt-1 h-10 w-full rounded-lg border border-border bg-bg px-3 font-mono text-xs text-text-h" />
-          </label>
+        <div className="mt-4">
+          <p className="text-xs font-medium text-text">Game type</p>
+          <div className="mt-1 grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => setGameType('onchain')} className={`rounded-lg border px-3 py-2 text-sm font-semibold ${gameType === 'onchain' ? 'border-accent bg-accent-bg text-accent' : 'border-border text-text-h'}`}>On-chain</button>
+            <button type="button" onClick={() => setGameType('casual')} className={`rounded-lg border px-3 py-2 text-sm font-semibold ${gameType === 'casual' ? 'border-accent bg-accent-bg text-accent' : 'border-border text-text-h'}`}>Casual (server)</button>
+          </div>
         </div>
+        {gameType === 'onchain' && (
+          <div className="mt-4 grid gap-3">
+            <label className="block">
+              <span className="block text-xs font-medium text-text">Amount (USDC)</span>
+              <input value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" placeholder="0" className="mt-1 h-10 w-full rounded-lg border border-border bg-bg px-3 text-sm text-text-h" />
+            </label>
+            <label className="block">
+              <span className="block text-xs font-medium text-text">Inviter address (optional)</span>
+              <input value={inviterAddress} onChange={(event) => setInviterAddress(event.target.value)} placeholder="0x… inviter address" className="mt-1 h-10 w-full rounded-lg border border-border bg-bg px-3 font-mono text-xs text-text-h" />
+            </label>
+          </div>
+        )}
+        {gameType === 'casual' && (
+          <p className="mt-4 rounded-lg border border-border bg-bg px-3 py-2 text-xs text-text">
+            Casual games run on the server and need no wallet. You will be redirected to the casual chess page.
+          </p>
+        )}
         {error && <p className="mt-3 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">{error}</p>}
         {createdGameId && <Link to={`/chess/${createdGameId}`} onClick={onClose} className="mt-3 block rounded-lg bg-accent-bg px-3 py-2 text-center text-sm font-semibold text-accent">Go to game {createdGameId} →</Link>}
-        <button type="button" disabled={isPending || waitingForEvent} onClick={() => void createGame()} className="mt-4 w-full rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{isPending ? 'Waiting for signature…' : waitingForEvent ? 'Waiting for game event…' : 'Create game'}</button>
+        {gameType === 'casual' ? (
+          <button type="button" onClick={async () => {
+            try {
+              const ts = Math.floor(Date.now() / 1000)
+              const message = `casual-chess:create:${ts}`
+              let signature: string
+              if (walletAddress) {
+                const sig = await signMessageAsync({ message })
+                if (!sig) throw new Error('signature failed')
+                signature = sig
+              } else {
+                signature = await getAnonymousCasualAccount().signMessage({ message })
+              }
+              const res = await fetch(`${gameHttpUrl(mode)}/games`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message, signature }),
+              })
+              const data = await res.json()
+              if (data.gameId) { onClose(); navigate(`/casual-chess/${data.gameId}`) }
+              else throw new Error(data.error ?? 'create failed')
+            } catch (e) {
+              setError(e instanceof Error ? e.message : 'create failed')
+            }
+          }} className="mt-4 w-full rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white">Create casual game</button>
+        ) : (
+          <button type="button" disabled={isPending || waitingForEvent} onClick={() => void createGame()} className="mt-4 w-full rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{isPending ? 'Waiting for signature…' : waitingForEvent ? 'Waiting for game event…' : 'Create game'}</button>
+        )}
       </div>
     </div>
   )
